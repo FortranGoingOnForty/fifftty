@@ -27,6 +27,8 @@ module font_manager
         integer :: atlas_width = 0
         integer :: atlas_height = 0
         integer :: font_size = 16
+        integer :: line_height = 0      ! Actual line height from font metrics
+        integer :: cell_advance = 0     ! Cell width (max advance)
         type(glyph_info_t) :: glyphs(0:MAX_GLYPHS-1)
     contains
         procedure :: init => font_mgr_init
@@ -84,11 +86,39 @@ contains
             return
         end if
 
+        ! Calculate font metrics from FreeType face
+        call calculate_font_metrics(this)
+
         ! Create glyph atlas
         call create_atlas(this)
 
         success = .true.
     end function font_mgr_init
+
+    ! Calculate font metrics from FreeType face
+    subroutine calculate_font_metrics(this)
+        class(font_mgr_t), intent(inout) :: this
+        type(FT_FaceRec), pointer :: face_rec
+        integer(c_long) :: height_26_6
+
+        call c_f_pointer(this%ft_face, face_rec)
+
+        ! For terminals, line_height = (ascender - descender) in pixels
+        ! FreeType stores metrics in 26.6 fixed-point format after FT_Set_Pixel_Sizes
+        ! Get the height from the size metrics (already in pixels)
+        ! Use glyph slot to get metrics in pixels
+        height_26_6 = int(face_rec%height, c_long)
+
+        ! Convert from font units to pixels
+        ! height is in font units, scale by (size / units_per_EM)
+        this%line_height = int((height_26_6 * int(this%font_size, c_long)) / &
+                          int(face_rec%units_per_EM, c_long))
+
+        ! For fixed-width terminals, use max_advance_width
+        this%cell_advance = int((int(face_rec%max_advance_width, c_long) * &
+                            int(this%font_size, c_long)) / &
+                            int(face_rec%units_per_EM, c_long))
+    end subroutine calculate_font_metrics
 
     ! Create texture atlas with all ASCII glyphs
     subroutine create_atlas(this)
@@ -116,6 +146,12 @@ contains
             call c_f_pointer(glyph_slot, glyph)
             total_width = total_width + glyph%bitmap%width + 1  ! +1 for padding
             if (glyph%bitmap%rows > max_height) max_height = glyph%bitmap%rows
+
+            ! For monospace terminal, ensure cell_advance is at least as wide as widest glyph
+            if (glyph%bitmap%width > this%cell_advance) then
+                this%cell_advance = glyph%bitmap%width
+            end if
+
             success_count = success_count + 1
         end do
 

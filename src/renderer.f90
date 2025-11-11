@@ -69,9 +69,9 @@ contains
             return
         end if
 
-        ! Estimate cell dimensions (use 'M' as reference)
-        this%cell_width = this%font_mgr%glyphs(ichar('M'))%advance
-        this%cell_height = font_size
+        ! Use font metrics for cell dimensions
+        this%cell_width = this%font_mgr%cell_advance
+        this%cell_height = this%font_mgr%line_height
 
         ! Compile shaders
         if (.not. compile_shaders(this)) then
