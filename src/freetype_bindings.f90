@@ -16,6 +16,12 @@ module freetype_bindings
     ! Render modes
     integer(c_int), parameter :: FT_RENDER_MODE_NORMAL = 0
 
+    ! Generic data structure (2 pointers)
+    type, bind(c) :: FT_Generic
+        type(c_ptr) :: data
+        type(c_ptr) :: finalizer
+    end type FT_Generic
+
     ! Glyph metrics structure (partial - only what we need)
     type, bind(c) :: FT_Glyph_Metrics
         integer(c_long) :: width
@@ -40,17 +46,23 @@ module freetype_bindings
         type(c_ptr) :: palette
     end type FT_Bitmap
 
+    ! Vector structure (used in glyph slot)
+    type, bind(c) :: FT_Vector
+        integer(c_long) :: x
+        integer(c_long) :: y
+    end type FT_Vector
+
     ! Glyph slot structure (partial)
     type, bind(c) :: FT_GlyphSlotRec
         type(c_ptr) :: library
         type(c_ptr) :: face
         type(c_ptr) :: next
-        integer(c_int) :: reserved
+        integer(c_int) :: glyph_index
+        type(FT_Generic) :: generic
         type(FT_Glyph_Metrics) :: metrics
         integer(c_long) :: linearHoriAdvance
         integer(c_long) :: linearVertAdvance
-        integer(c_long) :: advance_x
-        integer(c_long) :: advance_y
+        type(FT_Vector) :: advance
         integer(c_int) :: format
         type(FT_Bitmap) :: bitmap
         integer(c_int) :: bitmap_left
@@ -71,7 +83,23 @@ module freetype_bindings
         type(c_ptr) :: available_sizes
         integer(c_int) :: num_charmaps
         type(c_ptr) :: charmaps
-        ! ... more fields
+        ! FT_Generic generic (2 pointers)
+        type(c_ptr) :: generic_data
+        type(c_ptr) :: generic_finalizer
+        ! FT_BBox bbox (4 longs)
+        integer(c_long) :: bbox_xMin
+        integer(c_long) :: bbox_yMin
+        integer(c_long) :: bbox_xMax
+        integer(c_long) :: bbox_yMax
+        ! Metrics (shorts)
+        integer(c_short) :: units_per_EM
+        integer(c_short) :: ascender
+        integer(c_short) :: descender
+        integer(c_short) :: height
+        integer(c_short) :: max_advance_width
+        integer(c_short) :: max_advance_height
+        integer(c_short) :: underline_position
+        integer(c_short) :: underline_thickness
         type(c_ptr) :: glyph  ! Points to FT_GlyphSlotRec
         ! ... more fields we don't need
     end type FT_FaceRec
@@ -80,7 +108,7 @@ module freetype_bindings
         ! Library management
         function FT_Init_FreeType(alibrary) bind(c, name='FT_Init_FreeType')
             import :: c_int, c_ptr
-            type(c_ptr) :: alibrary
+            type(c_ptr), value :: alibrary
             integer(c_int) :: FT_Init_FreeType
         end function FT_Init_FreeType
 
@@ -93,11 +121,11 @@ module freetype_bindings
         ! Face management
         function FT_New_Face(library, filepathname, face_index, aface) &
                            bind(c, name='FT_New_Face')
-            import :: c_int, c_ptr, c_char, c_long
+            import :: c_int, c_ptr, c_long
             type(c_ptr), value :: library
-            character(kind=c_char), dimension(*) :: filepathname
+            type(c_ptr), value :: filepathname
             integer(c_long), value :: face_index
-            type(c_ptr) :: aface
+            type(c_ptr), value :: aface
             integer(c_int) :: FT_New_Face
         end function FT_New_Face
 

@@ -36,6 +36,7 @@ module opengl_bindings
     integer(GLenum), parameter :: GL_RED = int(z'1903', GLenum)
     integer(GLenum), parameter :: GL_UNSIGNED_BYTE = int(z'1401', GLenum)
     integer(GLenum), parameter :: GL_UNPACK_ALIGNMENT = int(z'0CF5', GLenum)
+    integer(GLenum), parameter :: GL_TEXTURE0 = int(z'84C0', GLenum)
 
     ! Shaders
     integer(GLenum), parameter :: GL_VERTEX_SHADER = int(z'8B31', GLenum)
@@ -68,6 +69,9 @@ module opengl_bindings
             import :: GLbitfield
             integer(GLbitfield), value :: mask
         end subroutine glClear
+
+        subroutine glFlush() bind(c, name='glFlush')
+        end subroutine glFlush
 
         subroutine glEnable(cap) bind(c, name='glEnable')
             import :: GLenum
@@ -232,6 +236,11 @@ module opengl_bindings
             integer(GLsizei), value :: n
             type(c_ptr), value :: textures
         end subroutine glGenTextures
+
+        subroutine glActiveTexture(texture) bind(c, name='glActiveTexture')
+            import :: GLenum
+            integer(GLenum), value :: texture
+        end subroutine glActiveTexture
 
         subroutine glBindTexture(target, texture) bind(c, name='glBindTexture')
             import :: GLenum, GLuint

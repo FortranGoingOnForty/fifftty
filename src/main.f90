@@ -72,6 +72,12 @@ contains
         end if
         global_gl_area = gl_area
 
+        ! Set size request to ensure GLArea has dimensions
+        call gtk_widget_set_size_request(gl_area, 800_c_int, 600_c_int)
+
+        ! Enable auto-rendering - GTK will handle render timing
+        call gtk_gl_area_set_auto_render(gl_area, 1_c_int)
+
         ! Add GLArea to window
         call gtk_window_set_child(window, gl_area)
 
@@ -85,8 +91,6 @@ contains
 
         ! Show window
         call gtk_window_present(window)
-
-        print *, "fortty: Window created with OpenGL support"
     end subroutine activate_callback
 
     ! Connect GL Area signals

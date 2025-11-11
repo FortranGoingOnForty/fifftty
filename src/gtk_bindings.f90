@@ -94,6 +94,23 @@ module gtk_bindings
             type(c_ptr), value :: area
         end subroutine gtk_gl_area_queue_render
 
+        subroutine gtk_widget_queue_draw(widget) bind(c, name='gtk_widget_queue_draw')
+            import :: c_ptr
+            type(c_ptr), value :: widget
+        end subroutine gtk_widget_queue_draw
+
+        subroutine gtk_gl_area_set_auto_render(area, auto_render) bind(c, name='gtk_gl_area_set_auto_render')
+            import :: c_ptr, c_int
+            type(c_ptr), value :: area
+            integer(c_int), value :: auto_render
+        end subroutine gtk_gl_area_set_auto_render
+
+        function gtk_gl_area_get_error(area) bind(c, name='gtk_gl_area_get_error')
+            import :: c_ptr
+            type(c_ptr), value :: area
+            type(c_ptr) :: gtk_gl_area_get_error
+        end function gtk_gl_area_get_error
+
         ! Event controllers
         function gtk_event_controller_key_new() bind(c, name='gtk_event_controller_key_new')
             import :: c_ptr
@@ -104,6 +121,12 @@ module gtk_bindings
             import :: c_ptr
             type(c_ptr), value :: widget, controller
         end subroutine gtk_widget_add_controller
+
+        subroutine gtk_widget_set_size_request(widget, width, height) bind(c, name='gtk_widget_set_size_request')
+            import :: c_ptr, c_int
+            type(c_ptr), value :: widget
+            integer(c_int), value :: width, height
+        end subroutine gtk_widget_set_size_request
 
         ! Timeouts
         function g_timeout_add(interval, function, data) bind(c, name='g_timeout_add')

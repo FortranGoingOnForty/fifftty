@@ -1,6 +1,7 @@
 module fortty_app
     use, intrinsic :: iso_c_binding
     use gtk_bindings
+    use opengl_bindings
     use terminal_grid
     use pty_manager
     use vt_parser
@@ -33,7 +34,6 @@ contains
         call global_parser%reset()
 
         ! Find a system font (monospace)
-        ! Try common font locations
         call find_system_font(font_path)
 
         ! Initialize renderer
@@ -45,12 +45,10 @@ contains
         ! Create PTY and spawn shell
         pty_success = global_pty%open(24, 80)
         if (.not. pty_success) then
-            print *, "Error: Failed to open PTY"
             return
         end if
 
         initialized = .true.
-        print *, "fortty: OpenGL and PTY initialized"
 
         ! Start PTY polling
         call start_pty_polling()
@@ -61,15 +59,15 @@ contains
         type(c_ptr), value :: gl_area, context, user_data
         integer(c_int) :: handled
 
-        if (.not. initialized) then
-            handled = 0  ! FALSE
-            return
-        end if
+        handled = 1  ! TRUE
+
+        if (.not. initialized) return
+
+        ! Make GL context current
+        call gtk_gl_area_make_current(gl_area)
 
         ! Render the terminal grid
         call global_renderer%draw_grid(global_grid)
-
-        handled = 1  ! TRUE - we handled the render
     end function gl_render_callback
 
     ! Key pressed callback - send input to PTY
@@ -129,11 +127,8 @@ contains
         if (bytes_read > 0) then
             ! Process data through VT parser
             call global_parser%process_buffer(global_grid, buffer, bytes_read)
-
-            ! Queue a render
-            if (c_associated(global_gl_area)) then
-                call gtk_gl_area_queue_render(global_gl_area)
-            end if
+            ! Request render (auto_render enabled, so GTK handles timing)
+            call gtk_widget_queue_draw(global_gl_area)
         end if
     end function pty_poll_callback
 
@@ -145,7 +140,7 @@ contains
         timeout_id = g_timeout_add(10_c_int, c_funloc(pty_poll_callback), c_null_ptr)
 
         if (timeout_id == 0) then
-            print *, "Warning: Failed to start PTY polling"
+            print *, "Error: Failed to start PTY polling"
         end if
     end subroutine start_pty_polling
 
@@ -157,7 +152,7 @@ contains
         integer :: i
 
         ! List of common monospace font locations (in priority order)
-        font_candidates(1) = "/System/Library/Fonts/Monaco.dfont"              ! macOS
+        font_candidates(1) = "/System/Library/Fonts/Menlo.ttc"                 ! macOS (scalable)
         font_candidates(2) = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"  ! Linux
         font_candidates(3) = "/usr/share/fonts/TTF/DejaVuSansMono.ttf"        ! Arch Linux
         font_candidates(4) = "/usr/share/fonts/liberation-mono/LiberationMono-Regular.ttf"  ! RHEL/Fedora
@@ -168,14 +163,12 @@ contains
             inquire(file=trim(font_candidates(i)), exist=file_exists)
             if (file_exists) then
                 font_path = font_candidates(i)
-                print *, "fortty: Using font:", trim(font_path)
                 return
             end if
         end do
 
-        ! No font found - use first as fallback and let renderer fail gracefully
+        ! No font found - use first as fallback
         font_path = font_candidates(1)
-        print *, "Warning: No system font found, trying:", trim(font_path)
     end subroutine find_system_font
 
 end module fortty_app

@@ -6,12 +6,17 @@ module pty_manager
     ! POSIX constants
     integer(c_int), parameter :: O_RDWR = int(z'0002', c_int)
     integer(c_int), parameter :: O_NOCTTY = int(z'0100', c_int)
+    integer(c_int), parameter :: O_NONBLOCK = int(z'0004', c_int)
+    integer(c_int), parameter :: F_GETFL = 3
+    integer(c_int), parameter :: F_SETFL = 4
     integer(c_int), parameter :: STDIN_FILENO = 0
     integer(c_int), parameter :: STDOUT_FILENO = 1
     integer(c_int), parameter :: STDERR_FILENO = 2
 
     ! ioctl constants for terminal window size
     integer(c_long), parameter :: TIOCSWINSZ = int(z'5414', c_long)
+    ! ioctl constant for non-blocking I/O (BSD/macOS)
+    integer(c_long), parameter :: FIONBIO = int(z'8004667e', c_long)
 
     ! Window size structure (struct winsize)
     type, bind(c) :: winsize_t
@@ -122,6 +127,12 @@ module pty_manager
             integer(c_int) :: ioctl
         end function ioctl
 
+        function fcntl(fd, cmd, arg) bind(c, name='fcntl')
+            import :: c_int
+            integer(c_int), value :: fd, cmd, arg
+            integer(c_int) :: fcntl
+        end function fcntl
+
         ! Environment and error handling
         function getenv(name) bind(c, name='getenv')
             import :: c_char, c_ptr
@@ -145,6 +156,7 @@ contains
         logical :: success
 
         integer(c_int) :: master_fd, slave_fd, pid, status
+        integer(c_int), target :: on_flag
         type(c_ptr) :: slave_name_ptr
         character(len=256) :: slave_name
         character(len=256) :: shell
@@ -156,6 +168,15 @@ contains
         master_fd = posix_openpt(ior(O_RDWR, O_NOCTTY))
         if (master_fd < 0) then
             call perror("posix_openpt" // c_null_char)
+            return
+        end if
+
+        ! Set master to non-blocking mode using ioctl FIONBIO (BSD/macOS way)
+        on_flag = 1  ! non-zero = enable non-blocking
+        status = ioctl(master_fd, FIONBIO, c_loc(on_flag))
+        if (status < 0) then
+            call perror("ioctl FIONBIO" // c_null_char)
+            status = c_close(master_fd)
             return
         end if
 
@@ -219,7 +240,7 @@ contains
         integer(c_int) :: slave_fd
         character(len=256) :: shell
         character(len=256, kind=c_char), target :: shell_cstr
-        type(c_ptr) :: argv(3)
+        type(c_ptr), target :: argv(3)
         character(len=3, kind=c_char), target :: dash_i
         integer :: i, slen
 
@@ -270,7 +291,7 @@ contains
         argv(3) = c_null_ptr
 
         ! This does not return if successful
-        if (execvp(shell_cstr, argv(1)) < 0) then
+        if (execvp(shell_cstr, c_loc(argv)) < 0) then
             call perror("execvp" // c_null_char)
             stop 1
         end if

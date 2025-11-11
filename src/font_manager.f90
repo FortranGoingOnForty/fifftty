@@ -2,6 +2,7 @@ module font_manager
     use, intrinsic :: iso_c_binding
     use freetype_bindings
     use opengl_bindings
+    use gtk_bindings, only: f_c_string
     implicit none
     private
 
@@ -44,24 +45,28 @@ contains
 
         integer(c_int) :: error
         type(c_ptr), target :: library_ptr, face_ptr
-        character(len=:, kind=c_char), allocatable :: c_font_path
+        character(len=:, kind=c_char), allocatable, target :: c_font_path
 
         success = .false.
         this%font_size = font_size
 
-        ! Convert font path to C string
-        c_font_path = trim(font_path) // c_null_char
+        ! Explicitly initialize pointers
+        library_ptr = transfer(0_c_intptr_t, library_ptr)
+        face_ptr = transfer(0_c_intptr_t, face_ptr)
+
+        ! Convert font path to C string using helper
+        c_font_path = f_c_string(font_path)
 
         ! Initialize FreeType
         error = FT_Init_FreeType(c_loc(library_ptr))
-        if (error /= FT_Err_Ok) then
+        if (error /= FT_Err_Ok .or. .not. c_associated(library_ptr)) then
             print *, "Error: Failed to initialize FreeType"
             return
         end if
         this%ft_library = library_ptr
 
         ! Load font face
-        error = FT_New_Face(this%ft_library, c_font_path, &
+        error = FT_New_Face(this%ft_library, c_loc(c_font_path), &
                            0_c_long, c_loc(face_ptr))
         if (error /= FT_Err_Ok) then
             print *, "Error: Failed to load font:", trim(font_path)
@@ -71,7 +76,7 @@ contains
         this%ft_face = face_ptr
 
         ! Set pixel size
-        error = FT_Set_Pixel_Sizes(this%ft_face, 0, int(font_size, c_int))
+        error = FT_Set_Pixel_Sizes(this%ft_face, 0_c_int, int(font_size, c_int))
         if (error /= FT_Err_Ok) then
             print *, "Error: Failed to set font size"
             error = FT_Done_Face(this%ft_face)
@@ -88,7 +93,7 @@ contains
     ! Create texture atlas with all ASCII glyphs
     subroutine create_atlas(this)
         class(font_mgr_t), intent(inout) :: this
-        integer :: i, max_height, total_width, current_x
+        integer :: i, max_height, total_width, current_x, success_count
         integer(c_int) :: error
         type(c_ptr) :: glyph_slot
         type(FT_GlyphSlotRec), pointer :: glyph
@@ -99,6 +104,7 @@ contains
         ! First pass: find atlas dimensions
         max_height = 0
         total_width = 0
+        success_count = 0
 
         do i = 32, 126  ! Printable ASCII
             error = FT_Load_Char(this%ft_face, int(i, c_long), FT_LOAD_RENDER)
@@ -110,6 +116,7 @@ contains
             call c_f_pointer(glyph_slot, glyph)
             total_width = total_width + glyph%bitmap%width + 1  ! +1 for padding
             if (glyph%bitmap%rows > max_height) max_height = glyph%bitmap%rows
+            success_count = success_count + 1
         end do
 
         ! Add some padding
@@ -143,7 +150,7 @@ contains
             this%glyphs(i)%height = bitmap%rows
             this%glyphs(i)%bearing_x = glyph%bitmap_left
             this%glyphs(i)%bearing_y = glyph%bitmap_top
-            this%glyphs(i)%advance = int(glyph%advance_x / 64)  ! Convert from 26.6 fixed point
+            this%glyphs(i)%advance = int(glyph%advance%x / 64)  ! Convert from 26.6 fixed point
 
             ! Texture coordinates (normalized to 0-1)
             this%glyphs(i)%tex_x = real(current_x, GLfloat) / real(total_width, GLfloat)
@@ -192,17 +199,21 @@ contains
         integer, intent(in) :: atlas(:,:)
         integer, intent(in) :: width, height
         integer(GLuint), target :: texture
-        integer(c_signed_char), allocatable, target :: gl_buffer(:)
-        integer :: i, j
+        integer(c_int8_t), allocatable, target :: gl_buffer(:)
+        integer :: i, j, val
 
         this%atlas_width = width
         this%atlas_height = height
 
-        ! Convert atlas to OpenGL buffer format (column-major, bottom-to-top)
+        ! Convert atlas to OpenGL buffer format (row-major for glTexImage2D)
         allocate(gl_buffer(width * height))
         do j = 1, height
             do i = 1, width
-                gl_buffer((j-1) * width + i) = int(atlas(i, j), c_signed_char)
+                val = atlas(i, j)
+                ! Ensure value is in 0-255 range as unsigned byte
+                if (val < 0) val = 0
+                if (val > 255) val = 255
+                gl_buffer((j-1) * width + i) = int(val, c_int8_t)
             end do
         end do
 
@@ -219,7 +230,7 @@ contains
         ! Set pixel unpacking alignment
         call glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
 
-        ! Upload texture data
+        ! Upload texture data (GL treats c_int8_t as unsigned byte when we specify GL_UNSIGNED_BYTE)
         call glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, width, height, 0, &
                          GL_RED, GL_UNSIGNED_BYTE, c_loc(gl_buffer))
 

@@ -37,6 +37,7 @@ module renderer
         integer(GLuint) :: vbo = 0
         integer(GLint) :: projection_loc = -1
         integer(GLint) :: text_color_loc = -1
+        integer(GLint) :: texture_loc = -1
         type(font_mgr_t) :: font_mgr
         integer :: window_width = 800
         integer :: window_height = 600
@@ -148,6 +149,12 @@ contains
         ! Get uniform locations
         this%projection_loc = glGetUniformLocation(this%shader_program, "projection" // c_null_char)
         this%text_color_loc = glGetUniformLocation(this%shader_program, "textColor" // c_null_char)
+        this%texture_loc = glGetUniformLocation(this%shader_program, "text" // c_null_char)
+
+        ! Set texture sampler to texture unit 0
+        call glUseProgram(this%shader_program)
+        call glUniform1i(this%texture_loc, 0)
+        call glUseProgram(0)
 
         success = .true.
     end function compile_shaders
@@ -276,43 +283,38 @@ contains
         type(grid_t), intent(in) :: grid
         integer :: row, col
         type(cell_t) :: cell
-        real(GLfloat) :: x, y, r, g, b
         real(GLfloat), target :: projection(16)
 
-        ! Clear screen
+        ! Clear screen to black (terminal background)
         call glClearColor(0.0, 0.0, 0.0, 1.0)
         call glClear(GL_COLOR_BUFFER_BIT)
 
         ! Use shader program
         call glUseProgram(this%shader_program)
 
-        ! Create orthographic projection matrix
+        ! Create orthographic projection matrix (matches window size)
         call create_ortho_matrix(projection, 0.0, real(this%window_width, GLfloat), &
                                 real(this%window_height, GLfloat), 0.0, -1.0, 1.0)
         call glUniformMatrix4fv(this%projection_loc, 1, int(GL_FALSE, GLboolean), c_loc(projection))
 
-        ! Bind font texture
-        call glBindTexture(GL_TEXTURE_2D, this%font_mgr%atlas_texture)
-        call glUniform1i(glGetUniformLocation(this%shader_program, "text" // c_null_char), 0)
-
         ! Bind VAO
         call glBindVertexArray(this%vao)
 
-        ! Draw each character
+        ! Activate texture unit 0 and bind font texture
+        call glActiveTexture(GL_TEXTURE0)
+        call glBindTexture(GL_TEXTURE_2D, this%font_mgr%atlas_texture)
+
+        ! Draw each character in the grid
         do row = 1, grid%rows
             do col = 1, grid%cols
-                cell = grid%get_cell(row, col)
-
-                ! Skip spaces (optimization)
-                if (cell%codepoint == 32) cycle
-
-                ! Get glyph info
-                call draw_character(this, cell%codepoint, row, col)
+                cell = grid%cells(col, row)  ! cells(col, row) not cells(row, col)
+                if (cell%codepoint > 0 .and. cell%codepoint /= 32) then
+                    call draw_character(this, cell%codepoint, row, col)
+                end if
             end do
         end do
 
         call glBindVertexArray(0)
-        call glUseProgram(0)
     end subroutine renderer_draw_grid
 
     ! Create orthographic projection matrix
