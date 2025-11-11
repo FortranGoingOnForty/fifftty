@@ -1,0 +1,9 @@
+TARGETS/
+build/
+*.o
+*.mod
+*.smod
+fortty
+*.out
+.DS_Store
+TARGETS/
