@@ -50,6 +50,7 @@ set(FORTTY_SOURCES
     src/font_manager.f90
     src/renderer.f90
     src/gtk_bindings.f90
+    src/fortty_app.f90
     src/main.f90
 )
 

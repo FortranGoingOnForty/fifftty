@@ -1,13 +1,14 @@
 program fortty_main
     use, intrinsic :: iso_c_binding
     use gtk_bindings
+    use fortty_app  ! Global state module
     implicit none
 
     type(c_ptr) :: app
     integer(c_int) :: status
     character(len=100) :: app_id
 
-    ! Application ID (reverse domain notation)
+    ! Application ID
     app_id = "com.fortrangoinonforty.fortty"
 
     ! Create GTK application
@@ -18,7 +19,7 @@ program fortty_main
         stop 1
     end if
 
-    ! Connect the activate signal to our callback
+    ! Connect the activate signal
     call connect_activate_signal(app)
 
     ! Run the application
@@ -27,7 +28,6 @@ program fortty_main
     ! Clean up
     call g_object_unref(app)
 
-    ! Exit with application status
     if (status /= 0) then
         print *, "Application exited with status:", status
         stop 1
@@ -35,16 +35,13 @@ program fortty_main
 
 contains
 
-    ! Connect the activate signal
+    ! Connect activate signal
     subroutine connect_activate_signal(application)
         type(c_ptr), intent(in) :: application
         integer(c_long) :: handler_id
         type(c_funptr) :: callback_ptr
 
-        ! Get function pointer to our activate callback
         callback_ptr = c_funloc(activate_callback)
-
-        ! Connect signal
         handler_id = g_signal_connect(application, "activate", callback_ptr, c_null_ptr)
 
         if (handler_id == 0) then
@@ -52,27 +49,65 @@ contains
         end if
     end subroutine connect_activate_signal
 
-    ! Activate callback - called when the application starts
+    ! Activate callback - main setup
     subroutine activate_callback(app, user_data) bind(c)
         type(c_ptr), value :: app, user_data
-        type(c_ptr) :: window
+        type(c_ptr) :: window, gl_area, key_controller
 
-        ! Create application window
+        ! Create window
         window = gtk_application_window_new(app)
-
         if (.not. c_associated(window)) then
             print *, "Error: Failed to create window"
             return
         end if
 
-        ! Configure window
         call gtk_window_set_title(window, f_c_string("fortty - Terminal Emulator"))
         call gtk_window_set_default_size(window, 800_c_int, 600_c_int)
+
+        ! Create GLArea widget for OpenGL rendering
+        gl_area = gtk_gl_area_new()
+        if (.not. c_associated(gl_area)) then
+            print *, "Error: Failed to create GLArea"
+            return
+        end if
+        global_gl_area = gl_area
+
+        ! Add GLArea to window
+        call gtk_window_set_child(window, gl_area)
+
+        ! Connect GLArea signals
+        call connect_gl_signals(gl_area)
+
+        ! Set up keyboard input
+        key_controller = gtk_event_controller_key_new()
+        call gtk_widget_add_controller(gl_area, key_controller)
+        call connect_key_signals(key_controller)
 
         ! Show window
         call gtk_window_present(window)
 
-        print *, "fortty: Window created successfully"
+        print *, "fortty: Window created with OpenGL support"
     end subroutine activate_callback
+
+    ! Connect GL Area signals
+    subroutine connect_gl_signals(gl_area)
+        type(c_ptr), intent(in) :: gl_area
+        integer(c_long) :: handler_id
+
+        ! Realize signal - called when GL context is created
+        handler_id = g_signal_connect(gl_area, "realize", c_funloc(gl_realize_callback), c_null_ptr)
+
+        ! Render signal - called when widget needs redrawing
+        handler_id = g_signal_connect(gl_area, "render", c_funloc(gl_render_callback), c_null_ptr)
+    end subroutine connect_gl_signals
+
+    ! Connect keyboard signals
+    subroutine connect_key_signals(controller)
+        type(c_ptr), intent(in) :: controller
+        integer(c_long) :: handler_id
+
+        handler_id = g_signal_connect(controller, "key-pressed", &
+                                      c_funloc(key_pressed_callback), c_null_ptr)
+    end subroutine connect_key_signals
 
 end program fortty_main

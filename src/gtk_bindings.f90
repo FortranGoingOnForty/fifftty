@@ -12,6 +12,21 @@ module gtk_bindings
     integer(c_int), parameter :: G_APPLICATION_DEFAULT_FLAGS = 0
     integer(c_int), parameter :: G_APPLICATION_FLAGS_NONE = 0
 
+    ! Key event structure (partial - for key presses)
+    type, bind(c) :: GdkEventKey
+        integer(c_int) :: type
+        type(c_ptr) :: window
+        integer(c_int8_t) :: send_event
+        integer(c_int32_t) :: time
+        integer(c_int) :: state
+        integer(c_int) :: keyval
+        integer(c_int) :: length
+        type(c_ptr) :: string
+        integer(c_int16_t) :: hardware_keycode
+        integer(c_int8_t) :: group
+        integer(c_int) :: is_modifier
+    end type GdkEventKey
+
     interface
         ! Application lifecycle
         function gtk_application_new(application_id, flags) bind(c, name='gtk_application_new')
@@ -57,6 +72,47 @@ module gtk_bindings
             import :: c_ptr
             type(c_ptr), value :: window
         end subroutine gtk_window_present
+
+        subroutine gtk_window_set_child(window, child) bind(c, name='gtk_window_set_child')
+            import :: c_ptr
+            type(c_ptr), value :: window, child
+        end subroutine gtk_window_set_child
+
+        ! GLArea widget
+        function gtk_gl_area_new() bind(c, name='gtk_gl_area_new')
+            import :: c_ptr
+            type(c_ptr) :: gtk_gl_area_new
+        end function gtk_gl_area_new
+
+        subroutine gtk_gl_area_make_current(area) bind(c, name='gtk_gl_area_make_current')
+            import :: c_ptr
+            type(c_ptr), value :: area
+        end subroutine gtk_gl_area_make_current
+
+        subroutine gtk_gl_area_queue_render(area) bind(c, name='gtk_gl_area_queue_render')
+            import :: c_ptr
+            type(c_ptr), value :: area
+        end subroutine gtk_gl_area_queue_render
+
+        ! Event controllers
+        function gtk_event_controller_key_new() bind(c, name='gtk_event_controller_key_new')
+            import :: c_ptr
+            type(c_ptr) :: gtk_event_controller_key_new
+        end function gtk_event_controller_key_new
+
+        subroutine gtk_widget_add_controller(widget, controller) bind(c, name='gtk_widget_add_controller')
+            import :: c_ptr
+            type(c_ptr), value :: widget, controller
+        end subroutine gtk_widget_add_controller
+
+        ! Timeouts
+        function g_timeout_add(interval, function, data) bind(c, name='g_timeout_add')
+            import :: c_int, c_funptr, c_ptr
+            integer(c_int), value :: interval
+            type(c_funptr), value :: function
+            type(c_ptr), value :: data
+            integer(c_int) :: g_timeout_add
+        end function g_timeout_add
 
         ! Signal handling
         function g_signal_connect_data(instance, detailed_signal, c_handler, &
