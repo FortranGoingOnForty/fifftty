@@ -227,6 +227,49 @@ contains
         call glViewport(0, 0, width, height)
     end subroutine renderer_resize
 
+    ! Draw a single character at grid position
+    subroutine draw_character(this, codepoint, row, col)
+        class(renderer_t), intent(inout) :: this
+        integer, intent(in) :: codepoint, row, col
+        type(glyph_info_t) :: glyph
+        real(GLfloat) :: x, y, w, h
+        real(GLfloat), target :: vertices(16)  ! 4 vertices * (2 pos + 2 tex)
+        integer(c_size_t) :: vertex_size
+
+        ! Get glyph from font manager
+        glyph = this%font_mgr%get_glyph(codepoint)
+
+        ! Set white color for Phase 1 (TODO: use cell colors)
+        call glUniform3f(this%text_color_loc, 1.0, 1.0, 1.0)
+
+        if (.not. glyph%loaded) return
+
+        ! Calculate screen position (top-left corner)
+        x = real((col - 1) * this%cell_width, GLfloat) + real(glyph%bearing_x, GLfloat)
+        y = real((row - 1) * this%cell_height, GLfloat) + &
+            real(this%cell_height - glyph%bearing_y, GLfloat)
+        w = real(glyph%width, GLfloat)
+        h = real(glyph%height, GLfloat)
+
+        ! Build vertex data: Position (x,y) + TexCoord (s,t)
+        ! Triangle strip: bottom-left, bottom-right, top-left, top-right
+        vertices = [ &
+            x,     y + h, glyph%tex_x,                    glyph%tex_y + glyph%tex_height, &
+            x + w, y + h, glyph%tex_x + glyph%tex_width, glyph%tex_y + glyph%tex_height, &
+            x,     y,     glyph%tex_x,                    glyph%tex_y, &
+            x + w, y,     glyph%tex_x + glyph%tex_width, glyph%tex_y &
+        ]
+
+        vertex_size = int(16, c_size_t) * c_sizeof(vertices(1))
+
+        ! Update VBO with character quad
+        call glBindBuffer(GL_ARRAY_BUFFER, this%vbo)
+        call glBufferData(GL_ARRAY_BUFFER, vertex_size, c_loc(vertices), GL_DYNAMIC_DRAW)
+
+        ! Draw the quad
+        call glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
+    end subroutine draw_character
+
     ! Draw terminal grid
     subroutine renderer_draw_grid(this, grid)
         class(renderer_t), intent(inout) :: this
@@ -263,19 +306,8 @@ contains
                 ! Skip spaces (optimization)
                 if (cell%codepoint == 32) cycle
 
-                ! Calculate position
-                x = real((col - 1) * this%cell_width, GLfloat)
-                y = real((row - 1) * this%cell_height, GLfloat)
-
-                ! Set text color (simple white for Phase 1)
-                r = 1.0
-                g = 1.0
-                b = 1.0
-                call glUniform3f(this%text_color_loc, r, g, b)
-
-                ! TODO: Draw character at x, y with appropriate glyph
-                ! For Phase 1, this is a simplified version
-                ! Full implementation would update vertex buffer per character
+                ! Get glyph info
+                call draw_character(this, cell%codepoint, row, col)
             end do
         end do
 

@@ -33,8 +33,8 @@ contains
         call global_parser%reset()
 
         ! Find a system font (monospace)
-        font_path = "/System/Library/Fonts/Monaco.dfont"  ! macOS
-        ! TODO: Add Linux font paths fallback
+        ! Try common font locations
+        call find_system_font(font_path)
 
         ! Initialize renderer
         if (.not. global_renderer%init(trim(font_path), 16, 800, 600)) then
@@ -148,5 +148,34 @@ contains
             print *, "Warning: Failed to start PTY polling"
         end if
     end subroutine start_pty_polling
+
+    ! Find a monospace system font
+    subroutine find_system_font(font_path)
+        character(len=*), intent(out) :: font_path
+        logical :: file_exists
+        character(len=256), dimension(5) :: font_candidates
+        integer :: i
+
+        ! List of common monospace font locations (in priority order)
+        font_candidates(1) = "/System/Library/Fonts/Monaco.dfont"              ! macOS
+        font_candidates(2) = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"  ! Linux
+        font_candidates(3) = "/usr/share/fonts/TTF/DejaVuSansMono.ttf"        ! Arch Linux
+        font_candidates(4) = "/usr/share/fonts/liberation-mono/LiberationMono-Regular.ttf"  ! RHEL/Fedora
+        font_candidates(5) = "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf"  ! Ubuntu
+
+        ! Try each font location
+        do i = 1, size(font_candidates)
+            inquire(file=trim(font_candidates(i)), exist=file_exists)
+            if (file_exists) then
+                font_path = font_candidates(i)
+                print *, "fortty: Using font:", trim(font_path)
+                return
+            end if
+        end do
+
+        ! No font found - use first as fallback and let renderer fail gracefully
+        font_path = font_candidates(1)
+        print *, "Warning: No system font found, trying:", trim(font_path)
+    end subroutine find_system_font
 
 end module fortty_app
