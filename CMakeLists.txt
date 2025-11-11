@@ -33,8 +33,10 @@ link_directories(${GTK4_LIBRARY_DIRS})
 
 # Source files
 set(FORTTY_SOURCES
-    src/main.f90
+    src/terminal_grid.f90
+    src/pty_manager.f90
     src/gtk_bindings.f90
+    src/main.f90
 )
 
 # Executable
