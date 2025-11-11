@@ -44,9 +44,13 @@ contains
 
         integer(c_int) :: error
         type(c_ptr), target :: library_ptr, face_ptr
+        character(len=:, kind=c_char), allocatable :: c_font_path
 
         success = .false.
         this%font_size = font_size
+
+        ! Convert font path to C string
+        c_font_path = trim(font_path) // c_null_char
 
         ! Initialize FreeType
         error = FT_Init_FreeType(c_loc(library_ptr))
@@ -57,7 +61,7 @@ contains
         this%ft_library = library_ptr
 
         ! Load font face
-        error = FT_New_Face(this%ft_library, trim(font_path) // c_null_char, &
+        error = FT_New_Face(this%ft_library, c_font_path, &
                            0_c_long, c_loc(face_ptr))
         if (error /= FT_Err_Ok) then
             print *, "Error: Failed to load font:", trim(font_path)
