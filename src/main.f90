@@ -78,6 +78,9 @@ contains
         ! Enable auto-rendering - GTK will handle render timing
         call gtk_gl_area_set_auto_render(gl_area, 1_c_int)
 
+        ! Make GLArea focusable so it can receive keyboard events
+        call gtk_widget_set_focusable(gl_area, 1_c_int)
+
         ! Add GLArea to window
         call gtk_window_set_child(window, gl_area)
 
@@ -91,6 +94,9 @@ contains
 
         ! Show window
         call gtk_window_present(window)
+
+        ! Give GLArea keyboard focus so it receives key events
+        call gtk_widget_grab_focus(gl_area)
     end subroutine activate_callback
 
     ! Connect GL Area signals

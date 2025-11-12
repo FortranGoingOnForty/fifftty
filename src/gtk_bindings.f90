@@ -128,6 +128,17 @@ module gtk_bindings
             integer(c_int), value :: width, height
         end subroutine gtk_widget_set_size_request
 
+        subroutine gtk_widget_set_focusable(widget, focusable) bind(c, name='gtk_widget_set_focusable')
+            import :: c_ptr, c_int
+            type(c_ptr), value :: widget
+            integer(c_int), value :: focusable
+        end subroutine gtk_widget_set_focusable
+
+        subroutine gtk_widget_grab_focus(widget) bind(c, name='gtk_widget_grab_focus')
+            import :: c_ptr
+            type(c_ptr), value :: widget
+        end subroutine gtk_widget_grab_focus
+
         ! Timeouts
         function g_timeout_add(interval, function, data) bind(c, name='g_timeout_add')
             import :: c_int, c_funptr, c_ptr

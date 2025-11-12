@@ -24,11 +24,10 @@ contains
         character(len=256) :: font_path
         logical :: pty_success
 
+        integer :: grid_rows, grid_cols
+
         ! Make GL context current
         call gtk_gl_area_make_current(gl_area)
-
-        ! Initialize terminal grid (80x24 is standard)
-        call global_grid%init(24, 80)
 
         ! Initialize VT parser
         call global_parser%reset()
@@ -36,17 +35,27 @@ contains
         ! Find a system font (monospace)
         call find_system_font(font_path)
 
-        ! Initialize renderer
+        ! Initialize renderer (this calculates cell dimensions)
         if (.not. global_renderer%init(trim(font_path), 16, 800, 600)) then
             print *, "Error: Failed to initialize renderer"
             return
         end if
 
-        ! Create PTY and spawn shell
-        pty_success = global_pty%open(24, 80)
+        ! Calculate terminal grid size from window and cell dimensions
+        grid_cols = 800 / global_renderer%cell_width
+        grid_rows = 600 / global_renderer%cell_height
+
+        ! Initialize terminal grid with calculated dimensions
+        call global_grid%init(grid_rows, grid_cols)
+
+        ! Create PTY and spawn shell with actual grid size
+        pty_success = global_pty%open(grid_rows, grid_cols)
         if (.not. pty_success) then
             return
         end if
+
+        ! Connect PTY to parser for bidirectional communication
+        call global_parser%set_pty(global_pty)
 
         initialized = .true.
 
@@ -78,13 +87,29 @@ contains
         integer(c_int) :: handled
         character(len=16) :: key_string
         integer :: bytes_written, key_len
+        integer, parameter :: GDK_CONTROL_MASK = 4  ! Ctrl modifier
 
         handled = 0  ! FALSE by default
 
         if (.not. initialized) return
 
+        ! Check for Ctrl+letter combinations (Ctrl+A through Ctrl+Z)
+        ! GTK sends lowercase letters with Ctrl modifier
+        if (iand(state, GDK_CONTROL_MASK) /= 0) then
+            ! Ctrl is pressed
+            if (keyval >= ichar('a') .and. keyval <= ichar('z')) then
+                ! Ctrl+A = 1, Ctrl+B = 2, ..., Ctrl+Z = 26
+                key_string(1:1) = char(keyval - ichar('a') + 1)
+                key_len = 1
+            else if (keyval >= ichar('A') .and. keyval <= ichar('Z')) then
+                ! Handle uppercase too (though GTK usually sends lowercase)
+                key_string(1:1) = char(keyval - ichar('A') + 1)
+                key_len = 1
+            else
+                return  ! Other Ctrl combinations not handled
+            end if
         ! Convert keyval to character and send to PTY
-        if (keyval >= 32 .and. keyval <= 126) then
+        else if (keyval >= 32 .and. keyval <= 126) then
             key_string(1:1) = char(keyval)
             key_len = 1
         else if (keyval == 65293) then  ! Return/Enter
@@ -99,6 +124,18 @@ contains
         else if (keyval == 65307) then  ! Escape
             key_string(1:1) = char(27)
             key_len = 1
+        else if (keyval == 65362) then  ! Up arrow
+            key_string(1:3) = char(27) // "[A"
+            key_len = 3
+        else if (keyval == 65364) then  ! Down arrow
+            key_string(1:3) = char(27) // "[B"
+            key_len = 3
+        else if (keyval == 65363) then  ! Right arrow
+            key_string(1:3) = char(27) // "[C"
+            key_len = 3
+        else if (keyval == 65361) then  ! Left arrow
+            key_string(1:3) = char(27) // "[D"
+            key_len = 3
         else
             return
         end if
@@ -127,8 +164,8 @@ contains
         if (bytes_read > 0) then
             ! Process data through VT parser
             call global_parser%process_buffer(global_grid, buffer, bytes_read)
-            ! Request render (auto_render enabled, so GTK handles timing)
-            call gtk_widget_queue_draw(global_gl_area)
+            ! Request GL render for GtkGLArea (more direct than queue_draw)
+            call gtk_gl_area_queue_render(global_gl_area)
         end if
     end function pty_poll_callback
 

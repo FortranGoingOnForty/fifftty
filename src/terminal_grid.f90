@@ -97,6 +97,10 @@ contains
                 this%cells(i, j)%attributes = 0
             end do
         end do
+
+        ! Reset cursor to home position
+        this%cursor_row = 1
+        this%cursor_col = 1
     end subroutine grid_clear
 
     ! Clear a single line

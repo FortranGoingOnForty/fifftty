@@ -35,6 +35,7 @@ module renderer
         integer(GLuint) :: shader_program = 0
         integer(GLuint) :: vao = 0
         integer(GLuint) :: vbo = 0
+        integer(GLuint) :: white_texture = 0  ! 1x1 white texture for solid colors
         integer(GLint) :: projection_loc = -1
         integer(GLint) :: text_color_loc = -1
         integer(GLint) :: texture_loc = -1
@@ -52,7 +53,48 @@ module renderer
 
     public :: renderer_init, renderer_destroy
 
+    ! ANSI color palette (16 colors: 8 normal + 8 bright)
+    ! Format: RGB values 0.0-1.0
+    real(GLfloat), parameter :: COLOR_PALETTE(3, 16) = reshape([ &
+        ! Normal colors (0-7)
+        0.0, 0.0, 0.0,      & ! Black
+        0.8, 0.0, 0.0,      & ! Red
+        0.0, 0.8, 0.0,      & ! Green
+        0.8, 0.8, 0.0,      & ! Yellow
+        0.0, 0.0, 0.8,      & ! Blue
+        0.8, 0.0, 0.8,      & ! Magenta
+        0.0, 0.8, 0.8,      & ! Cyan
+        0.8, 0.8, 0.8,      & ! White
+        ! Bright colors (8-15)
+        0.5, 0.5, 0.5,      & ! Bright Black (Gray)
+        1.0, 0.0, 0.0,      & ! Bright Red
+        0.0, 1.0, 0.0,      & ! Bright Green
+        1.0, 1.0, 0.0,      & ! Bright Yellow
+        0.0, 0.0, 1.0,      & ! Bright Blue
+        1.0, 0.0, 1.0,      & ! Bright Magenta
+        0.0, 1.0, 1.0,      & ! Bright Cyan
+        1.0, 1.0, 1.0       & ! Bright White
+    ], shape(COLOR_PALETTE))
+
 contains
+
+    ! Get RGB color from ANSI color index
+    subroutine get_ansi_color(color_index, r, g, b)
+        integer, intent(in) :: color_index
+        real(GLfloat), intent(out) :: r, g, b
+
+        ! Default to white if COLOR_DEFAULT or out of range
+        if (color_index == COLOR_DEFAULT .or. color_index < 0 .or. color_index > 15) then
+            r = 1.0
+            g = 1.0
+            b = 1.0
+        else
+            ! ANSI colors are 0-15, but array is 1-16
+            r = COLOR_PALETTE(1, color_index + 1)
+            g = COLOR_PALETTE(2, color_index + 1)
+            b = COLOR_PALETTE(3, color_index + 1)
+        end if
+    end subroutine get_ansi_color
 
     ! Initialize renderer
     function renderer_init(this, font_path, font_size, width, height) result(success)
@@ -91,8 +133,36 @@ contains
         call glEnable(GL_BLEND)
         call glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
 
+        ! Create 1x1 white texture for solid color rendering (cursor, etc.)
+        call create_white_texture(this)
+
         success = .true.
     end function renderer_init
+
+    ! Create a 1x1 white texture for solid color rendering
+    subroutine create_white_texture(this)
+        class(renderer_t), intent(inout) :: this
+        integer(GLubyte), target :: white_pixel(1)
+        integer(GLuint), target :: tex_id
+        integer(c_size_t) :: pixel_size
+
+        white_pixel(1) = int(-1, GLubyte)  ! -1 as signed byte = 255 as unsigned byte
+
+        call glGenTextures(1, c_loc(tex_id))
+        this%white_texture = tex_id
+        call glBindTexture(GL_TEXTURE_2D, this%white_texture)
+
+        pixel_size = c_sizeof(white_pixel(1))
+        call glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, 1, 1, 0, GL_RED, GL_UNSIGNED_BYTE, c_loc(white_pixel))
+
+        ! Set texture parameters
+        call glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+        call glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+        call glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+        call glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
+
+        call glBindTexture(GL_TEXTURE_2D, 0)
+    end subroutine create_white_texture
 
     ! Compile vertex and fragment shaders
     function compile_shaders(this) result(success)
@@ -235,19 +305,20 @@ contains
     end subroutine renderer_resize
 
     ! Draw a single character at grid position
-    subroutine draw_character(this, codepoint, row, col)
+    subroutine draw_character(this, codepoint, row, col, fg_color)
         class(renderer_t), intent(inout) :: this
-        integer, intent(in) :: codepoint, row, col
+        integer, intent(in) :: codepoint, row, col, fg_color
         type(glyph_info_t) :: glyph
-        real(GLfloat) :: x, y, w, h
+        real(GLfloat) :: x, y, w, h, r, g, b
         real(GLfloat), target :: vertices(16)  ! 4 vertices * (2 pos + 2 tex)
         integer(c_size_t) :: vertex_size
 
         ! Get glyph from font manager
         glyph = this%font_mgr%get_glyph(codepoint)
 
-        ! Set white color for Phase 1 (TODO: use cell colors)
-        call glUniform3f(this%text_color_loc, 1.0, 1.0, 1.0)
+        ! Convert ANSI color index to RGB
+        call get_ansi_color(fg_color, r, g, b)
+        call glUniform3f(this%text_color_loc, r, g, b)
 
         if (.not. glyph%loaded) return
 
@@ -309,13 +380,59 @@ contains
             do col = 1, grid%cols
                 cell = grid%cells(col, row)  ! cells(col, row) not cells(row, col)
                 if (cell%codepoint > 0 .and. cell%codepoint /= 32) then
-                    call draw_character(this, cell%codepoint, row, col)
+                    call draw_character(this, cell%codepoint, row, col, cell%fg_color)
                 end if
             end do
         end do
 
+        ! Draw cursor if visible
+        if (grid%cursor_visible) then
+            call draw_cursor(this, grid%cursor_row, grid%cursor_col)
+        end if
+
         call glBindVertexArray(0)
     end subroutine renderer_draw_grid
+
+    ! Draw cursor at grid position
+    subroutine draw_cursor(this, row, col)
+        class(renderer_t), intent(inout) :: this
+        integer, intent(in) :: row, col
+        real(GLfloat) :: x, y, w, h
+        real(GLfloat), target :: vertices(16)
+        integer(c_size_t) :: vertex_size
+
+        ! Calculate cursor position (underline style)
+        x = real((col - 1) * this%cell_width, GLfloat)
+        y = real(row * this%cell_height - 2, GLfloat)  ! Near bottom of cell
+        w = real(this%cell_width, GLfloat)
+        h = 2.0  ! 2-pixel thick underline
+
+        ! Set cursor color (bright green)
+        call glUniform3f(this%text_color_loc, 0.0, 1.0, 0.0)
+
+        ! Bind white texture for solid color rendering
+        ! This gives us alpha=1.0 everywhere, making cursor fully opaque
+        call glBindTexture(GL_TEXTURE_2D, this%white_texture)
+
+        ! Build vertex data for cursor rectangle
+        ! Texture coords (0,0) to (1,1) sample the single white pixel
+        vertices = [ &
+            x,     y + h, 0.0, 0.0, &
+            x + w, y + h, 1.0, 0.0, &
+            x,     y,     0.0, 1.0, &
+            x + w, y,     1.0, 1.0 &
+        ]
+
+        vertex_size = int(16, c_size_t) * c_sizeof(vertices(1))
+
+        ! Update VBO and draw cursor
+        call glBindBuffer(GL_ARRAY_BUFFER, this%vbo)
+        call glBufferData(GL_ARRAY_BUFFER, vertex_size, c_loc(vertices), GL_DYNAMIC_DRAW)
+        call glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
+
+        ! Rebind font texture for subsequent character rendering
+        call glBindTexture(GL_TEXTURE_2D, this%font_mgr%atlas_texture)
+    end subroutine draw_cursor
 
     ! Create orthographic projection matrix
     subroutine create_ortho_matrix(matrix, left, right, bottom, top, near, far)
@@ -335,6 +452,14 @@ contains
     ! Destroy renderer
     subroutine renderer_destroy(this)
         class(renderer_t), intent(inout) :: this
+        integer(GLuint), target :: tex_id
+
+        ! Clean up textures
+        if (this%white_texture /= 0) then
+            tex_id = this%white_texture
+            call glDeleteTextures(1, c_loc(tex_id))
+        end if
+
         call this%font_mgr%destroy()
     end subroutine renderer_destroy
 

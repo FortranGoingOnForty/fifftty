@@ -10,6 +10,7 @@ module opengl_bindings
     integer, parameter :: GLboolean = c_signed_char
     integer, parameter :: GLbitfield = c_int
     integer, parameter :: GLfloat = c_float
+    integer, parameter :: GLubyte = c_signed_char
 
     ! OpenGL constants
     integer(GLenum), parameter :: GL_FALSE = 0
@@ -32,7 +33,11 @@ module opengl_bindings
     integer(GLenum), parameter :: GL_TEXTURE_2D = int(z'0DE1', GLenum)
     integer(GLenum), parameter :: GL_TEXTURE_MIN_FILTER = int(z'2801', GLenum)
     integer(GLenum), parameter :: GL_TEXTURE_MAG_FILTER = int(z'2800', GLenum)
+    integer(GLenum), parameter :: GL_TEXTURE_WRAP_S = int(z'2802', GLenum)
+    integer(GLenum), parameter :: GL_TEXTURE_WRAP_T = int(z'2803', GLenum)
     integer(GLenum), parameter :: GL_LINEAR = int(z'2601', GLenum)
+    integer(GLenum), parameter :: GL_NEAREST = int(z'2600', GLenum)
+    integer(GLenum), parameter :: GL_CLAMP_TO_EDGE = int(z'812F', GLenum)
     integer(GLenum), parameter :: GL_RED = int(z'1903', GLenum)
     integer(GLenum), parameter :: GL_UNSIGNED_BYTE = int(z'1401', GLenum)
     integer(GLenum), parameter :: GL_UNPACK_ALIGNMENT = int(z'0CF5', GLenum)
@@ -236,6 +241,12 @@ module opengl_bindings
             integer(GLsizei), value :: n
             type(c_ptr), value :: textures
         end subroutine glGenTextures
+
+        subroutine glDeleteTextures(n, textures) bind(c, name='glDeleteTextures')
+            import :: GLsizei, c_ptr
+            integer(GLsizei), value :: n
+            type(c_ptr), value :: textures
+        end subroutine glDeleteTextures
 
         subroutine glActiveTexture(texture) bind(c, name='glActiveTexture')
             import :: GLenum

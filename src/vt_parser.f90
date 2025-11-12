@@ -1,5 +1,7 @@
 module vt_parser
+    use, intrinsic :: iso_c_binding
     use terminal_grid
+    use pty_manager
     implicit none
     private
 
@@ -9,6 +11,9 @@ module vt_parser
     integer, parameter, public :: STATE_CSI_ENTRY = 2
     integer, parameter, public :: STATE_CSI_PARAM = 3
     integer, parameter, public :: STATE_CSI_INTERMEDIATE = 4
+    integer, parameter, public :: STATE_OSC_STRING = 5
+    integer, parameter, public :: STATE_ESCAPE_INTERMEDIATE = 6
+    integer, parameter, public :: STATE_DCS_STRING = 7
 
     ! Maximum parameters in a CSI sequence
     integer, parameter :: MAX_PARAMS = 16
@@ -19,13 +24,16 @@ module vt_parser
         integer :: params(MAX_PARAMS) = 0
         integer :: num_params = 0
         character(len=2) :: intermediates = ""
+        logical :: private_mode = .false.   ! For CSI sequences starting with '?'
         integer :: current_fg = COLOR_DEFAULT
         integer :: current_bg = COLOR_DEFAULT
         integer :: current_attrs = 0
+        type(c_ptr) :: pty_ptr = c_null_ptr  ! Pointer to PTY for sending responses
     contains
         procedure :: reset => parser_reset
         procedure :: process_byte => parser_process_byte
         procedure :: process_buffer => parser_process_buffer
+        procedure :: set_pty => parser_set_pty
     end type parser_t
 
 contains
@@ -37,10 +45,18 @@ contains
         this%params = 0
         this%num_params = 0
         this%intermediates = ""
+        this%private_mode = .false.
         this%current_fg = COLOR_DEFAULT
         this%current_bg = COLOR_DEFAULT
         this%current_attrs = 0
     end subroutine parser_reset
+
+    ! Set PTY for sending responses
+    subroutine parser_set_pty(this, pty)
+        class(parser_t), intent(inout) :: this
+        type(pty_t), target, intent(in) :: pty
+        this%pty_ptr = c_loc(pty)
+    end subroutine parser_set_pty
 
     ! Process a single byte through the state machine
     subroutine parser_process_byte(this, grid, byte)
@@ -53,12 +69,18 @@ contains
             call handle_ground(this, grid, byte)
         case (STATE_ESCAPE)
             call handle_escape(this, grid, byte)
+        case (STATE_ESCAPE_INTERMEDIATE)
+            call handle_escape_intermediate(this, grid, byte)
         case (STATE_CSI_ENTRY)
             call handle_csi_entry(this, grid, byte)
         case (STATE_CSI_PARAM)
             call handle_csi_param(this, grid, byte)
         case (STATE_CSI_INTERMEDIATE)
             call handle_csi_intermediate(this, grid, byte)
+        case (STATE_OSC_STRING)
+            call handle_osc_string(this, grid, byte)
+        case (STATE_DCS_STRING)
+            call handle_dcs_string(this, grid, byte)
         end select
     end subroutine parser_process_byte
 
@@ -95,6 +117,8 @@ contains
             if (grid%cursor_col > grid%cols) call handle_newline(grid)
         else if (byte >= 32 .and. byte <= 126) then  ! Printable ASCII
             call write_char(parser, grid, byte)
+        else if (byte > 0 .and. byte < 32) then  ! Other control characters
+            print '(A,I0,A,Z2.2)', "DEBUG: Ignored control char: ", byte, " (0x", byte, ")"
         end if
     end subroutine handle_ground
 
@@ -109,11 +133,81 @@ contains
             parser%params = 0
             parser%num_params = 0
             parser%intermediates = ""
+            parser%private_mode = .false.
+        else if (byte == 93) then  ! ']' - OSC sequence
+            parser%state = STATE_OSC_STRING
+        else if (byte == 80) then  ! 'P' - DCS (Device Control String)
+            parser%state = STATE_DCS_STRING
+        else if (byte == 92) then  ! '\' - String terminator (ST)
+            ! ESC \ terminates OSC/DCS/APC/PM/SOS sequences
+            ! Just consume it and return to ground
+            parser%state = STATE_GROUND
+        else if (byte == 61) then  ! '=' - DECPAM (application keypad mode)
+            ! Phase 1: ignore keypad mode changes
+            parser%state = STATE_GROUND
+        else if (byte == 62) then  ! '>' - DECPNM (normal keypad mode)
+            ! Phase 1: ignore keypad mode changes
+            parser%state = STATE_GROUND
+        else if (byte == 40 .or. byte == 41 .or. byte == 42 .or. byte == 43) then  ! '(', ')', '*', '+'
+            ! Charset selection sequences ESC ( X, ESC ) X, etc.
+            ! Phase 1: consume the next byte (the charset designator) and ignore
+            parser%state = STATE_ESCAPE_INTERMEDIATE
         else
             ! Unknown escape sequence, return to ground
+            if (byte >= 32 .and. byte <= 126) then
+                print '(A,A,A,I0,A)', "DEBUG: Unhandled ESC ", char(byte), " (", byte, ")"
+            else
+                print '(A,I0,A,Z2.2)', "DEBUG: Unhandled ESC+byte: ", byte, " (0x", byte, ")"
+            end if
             parser%state = STATE_GROUND
         end if
     end subroutine handle_escape
+
+    ! Handle ESCAPE_INTERMEDIATE state (consume one byte after certain ESC sequences)
+    subroutine handle_escape_intermediate(parser, grid, byte)
+        type(parser_t), intent(inout) :: parser
+        type(grid_t), intent(inout) :: grid
+        integer, intent(in) :: byte
+
+        ! Just consume the byte and return to ground
+        ! Phase 1: ignore charset designators and other intermediate bytes
+        parser%state = STATE_GROUND
+    end subroutine handle_escape_intermediate
+
+    ! Handle OSC_STRING state (Operating System Command)
+    ! OSC sequences: ESC ] ... BEL or ESC ] ... ESC \
+    subroutine handle_osc_string(parser, grid, byte)
+        type(parser_t), intent(inout) :: parser
+        type(grid_t), intent(inout) :: grid
+        integer, intent(in) :: byte
+
+        ! Check for terminator
+        if (byte == 7) then  ! BEL - terminate OSC
+            parser%state = STATE_GROUND
+        else if (byte == 27) then  ! ESC - might be ESC \ terminator
+            ! For simplicity, treat ESC as terminator and return to ESCAPE state
+            ! This handles ESC \ (next byte will be \) and other ESC sequences
+            parser%state = STATE_ESCAPE
+        end if
+        ! All other bytes are consumed and ignored (Phase 1: no OSC handling)
+    end subroutine handle_osc_string
+
+    ! Handle DCS_STRING state (Device Control String)
+    ! DCS sequences: ESC P ... BEL or ESC P ... ESC \
+    subroutine handle_dcs_string(parser, grid, byte)
+        type(parser_t), intent(inout) :: parser
+        type(grid_t), intent(inout) :: grid
+        integer, intent(in) :: byte
+
+        ! Check for terminator
+        if (byte == 7) then  ! BEL - terminate DCS
+            parser%state = STATE_GROUND
+        else if (byte == 27) then  ! ESC - might be ESC \ terminator
+            ! Return to ESCAPE state to handle the backslash
+            parser%state = STATE_ESCAPE
+        end if
+        ! All other bytes are consumed and ignored (Phase 1: no DCS handling)
+    end subroutine handle_dcs_string
 
     ! Handle CSI_ENTRY state
     subroutine handle_csi_entry(parser, grid, byte)
@@ -121,15 +215,21 @@ contains
         type(grid_t), intent(inout) :: grid
         integer, intent(in) :: byte
 
-        if (byte >= 48 .and. byte <= 57) then  ! '0'-'9'
+        if (byte == 63) then  ! '?' - DEC private mode
+            parser%private_mode = .true.
+            parser%state = STATE_CSI_PARAM
+            parser%num_params = 0
+        else if (byte >= 48 .and. byte <= 57) then  ! '0'-'9'
             parser%state = STATE_CSI_PARAM
             parser%num_params = 1
             parser%params(1) = byte - 48
         else if (byte >= 64 .and. byte <= 126) then  ! Final byte
             call execute_csi(parser, grid, char(byte))
             parser%state = STATE_GROUND
+            parser%private_mode = .false.
         else
             parser%state = STATE_GROUND
+            parser%private_mode = .false.
         end if
     end subroutine handle_csi_entry
 
@@ -140,6 +240,11 @@ contains
         integer, intent(in) :: byte
 
         if (byte >= 48 .and. byte <= 57) then  ! '0'-'9'
+            ! If first digit after '?', initialize first param
+            if (parser%num_params == 0) then
+                parser%num_params = 1
+                parser%params(1) = 0
+            end if
             parser%params(parser%num_params) = parser%params(parser%num_params) * 10 + (byte - 48)
         else if (byte == 59) then  ! ';' - parameter separator
             if (parser%num_params < MAX_PARAMS) then
@@ -149,8 +254,10 @@ contains
         else if (byte >= 64 .and. byte <= 126) then  ! Final byte
             call execute_csi(parser, grid, char(byte))
             parser%state = STATE_GROUND
+            parser%private_mode = .false.
         else
             parser%state = STATE_GROUND
+            parser%private_mode = .false.
         end if
     end subroutine handle_csi_param
 
@@ -175,6 +282,13 @@ contains
         character(len=1), intent(in) :: final_byte
 
         integer :: n, row, col
+        character(len=32) :: response
+
+        ! Phase 1: Ignore DEC private mode sequences (ESC[?...)
+        if (parser%private_mode) then
+            print '(A,A,A,20I0)', "DEBUG: Ignored CSI? ", final_byte, " params:", parser%params(1:min(parser%num_params, 20))
+            return
+        end if
 
         select case (final_byte)
         case ('A')  ! CUU - Cursor Up
@@ -212,6 +326,23 @@ contains
         case ('m')  ! SGR - Select Graphic Rendition
             call handle_sgr(parser, grid)
 
+        case ('c')  ! DA - Device Attributes
+            ! Send VT100 response: ESC [ ? 1 ; 2 c
+            print '(A)', "DEBUG: Received CSI c (Device Attributes query), sending VT100 response"
+            call send_response(parser, char(27) // "[?1;2c")
+
+        case ('n')  ! DSR - Device Status Report
+            if (parser%num_params >= 1 .and. parser%params(1) == 6) then
+                ! CPR - Cursor Position Report: ESC [ row ; col R
+                write(response, '(A,I0,A,I0,A)') char(27) // "[", &
+                      grid%cursor_row, ";", grid%cursor_col, "R"
+                print '(A,I0,A,I0,A)', "DEBUG: Received CSI 6 n (cursor position query), reporting: row=", &
+                      grid%cursor_row, ", col=", grid%cursor_col
+                call send_response(parser, trim(response))
+            end if
+
+        case default
+            print '(A,A,A,20I0)', "DEBUG: Unhandled CSI ", final_byte, " params:", parser%params(1:min(parser%num_params, 20))
         end select
     end subroutine execute_csi
 
@@ -273,16 +404,26 @@ contains
     subroutine erase_display(grid, mode)
         type(grid_t), intent(inout) :: grid
         integer, intent(in) :: mode
-        integer :: row
+        integer :: row, col
 
         select case (mode)
         case (0)  ! Clear from cursor to end of screen
-            do row = grid%cursor_row, grid%rows
+            ! Clear from cursor to end of current line
+            do col = grid%cursor_col, grid%cols
+                call grid%set_cell(grid%cursor_row, col, 32, COLOR_DEFAULT, COLOR_DEFAULT, 0)
+            end do
+            ! Clear all lines below
+            do row = grid%cursor_row + 1, grid%rows
                 call grid%clear_line(row)
             end do
         case (1)  ! Clear from beginning to cursor
-            do row = 1, grid%cursor_row
+            ! Clear all lines above current
+            do row = 1, grid%cursor_row - 1
                 call grid%clear_line(row)
+            end do
+            ! Clear from beginning of current line to cursor
+            do col = 1, grid%cursor_col
+                call grid%set_cell(grid%cursor_row, col, 32, COLOR_DEFAULT, COLOR_DEFAULT, 0)
             end do
         case (2, 3)  ! Clear entire screen
             call grid%clear()
@@ -293,10 +434,18 @@ contains
     subroutine erase_line(grid, mode)
         type(grid_t), intent(inout) :: grid
         integer, intent(in) :: mode
+        integer :: col
 
         select case (mode)
-        case (0, 1, 2)
-            ! For Phase 1, just clear the entire line
+        case (0)  ! Clear from cursor to end of line
+            do col = grid%cursor_col, grid%cols
+                call grid%set_cell(grid%cursor_row, col, 32, COLOR_DEFAULT, COLOR_DEFAULT, 0)
+            end do
+        case (1)  ! Clear from beginning to cursor
+            do col = 1, grid%cursor_col
+                call grid%set_cell(grid%cursor_row, col, 32, COLOR_DEFAULT, COLOR_DEFAULT, 0)
+            end do
+        case (2)  ! Clear entire line
             call grid%clear_line(grid%cursor_row)
         end select
     end subroutine erase_line
@@ -333,5 +482,27 @@ contains
             grid%cursor_row = grid%rows
         end if
     end subroutine handle_newline
+
+    ! Send response to PTY
+    subroutine send_response(parser, response)
+        type(parser_t), intent(in) :: parser
+        character(len=*), intent(in) :: response
+        type(pty_t), pointer :: pty
+        integer :: bytes_written
+
+        if (.not. c_associated(parser%pty_ptr)) then
+            print '(A)', "DEBUG: ERROR - PTY not associated with parser!"
+            return
+        end if
+
+        call c_f_pointer(parser%pty_ptr, pty)
+        bytes_written = pty%write(response, len_trim(response))
+
+        if (bytes_written < 0) then
+            print '(A)', "DEBUG: Failed to send response to PTY"
+        else
+            print '(A,I0,A)', "DEBUG: Successfully sent ", bytes_written, " bytes to PTY"
+        end if
+    end subroutine send_response
 
 end module vt_parser

@@ -140,11 +140,47 @@ module pty_manager
             type(c_ptr) :: getenv
         end function getenv
 
+        function setenv(name, value, overwrite) bind(c, name='setenv')
+            import :: c_char, c_int
+            character(kind=c_char), dimension(*) :: name, value
+            integer(c_int), value :: overwrite
+            integer(c_int) :: setenv
+        end function setenv
+
         subroutine perror(s) bind(c, name='perror')
             import :: c_char
             character(kind=c_char), dimension(*) :: s
         end subroutine perror
+
+        ! Terminal I/O control
+        function tcgetattr(fd, termios_p) bind(c, name='tcgetattr')
+            import :: c_int, c_ptr
+            integer(c_int), value :: fd
+            type(c_ptr), value :: termios_p
+            integer(c_int) :: tcgetattr
+        end function tcgetattr
+
+        function tcsetattr(fd, optional_actions, termios_p) bind(c, name='tcsetattr')
+            import :: c_int, c_ptr
+            integer(c_int), value :: fd, optional_actions
+            type(c_ptr), value :: termios_p
+            integer(c_int) :: tcsetattr
+        end function tcsetattr
     end interface
+
+    ! termios structure (simplified for our needs)
+    type, bind(c) :: termios_t
+        integer(c_int) :: c_iflag   ! Input flags
+        integer(c_int) :: c_oflag   ! Output flags
+        integer(c_int) :: c_cflag   ! Control flags
+        integer(c_int) :: c_lflag   ! Local flags
+        integer(c_char) :: c_cc(20) ! Control characters
+    end type termios_t
+
+    ! termios flags
+    integer(c_int), parameter :: ECHO = int(o'0000010', c_int)
+    integer(c_int), parameter :: ECHONL = int(o'0000100', c_int)
+    integer(c_int), parameter :: TCSANOW = 0
 
 contains
 
@@ -262,6 +298,10 @@ contains
         if (dup2(slave_fd, STDOUT_FILENO) < 0) stop 1
         if (dup2(slave_fd, STDERR_FILENO) < 0) stop 1
 
+        ! Disable local echo on the slave PTY to prevent character doubling
+        ! The shell will echo characters back, which we'll display
+        call disable_pty_echo(STDIN_FILENO)
+
         ! Close slave fd (already duplicated)
         if (slave_fd > 2) then
             if (c_close(slave_fd) < 0) then
@@ -284,6 +324,17 @@ contains
         end do
         shell_cstr(slen+1:slen+1) = c_null_char
 
+        ! Set TERM environment variable so shell knows terminal capabilities
+        if (setenv("TERM" // c_null_char, "xterm-256color" // c_null_char, 1) /= 0) then
+            print *, "ERROR: Failed to set TERM environment variable"
+        end if
+
+        ! Disable zsh PROMPT_SP to avoid the "%" marker for now
+        ! TODO: Remove this once we properly handle cursor position queries
+        if (setenv("PROMPT_SP" // c_null_char, "" // c_null_char, 1) /= 0) then
+            print *, "Warning: Failed to set PROMPT_SP"
+        end if
+
         ! Execute shell with -i flag (interactive)
         dash_i = "-i" // c_null_char
         argv(1) = c_loc(shell_cstr)
@@ -296,6 +347,30 @@ contains
             stop 1
         end if
     end subroutine child_setup
+
+    ! Disable local echo on PTY to prevent character doubling
+    subroutine disable_pty_echo(fd)
+        integer(c_int), intent(in) :: fd
+        type(termios_t), target :: tio
+        integer(c_int) :: status
+
+        ! Get current terminal settings
+        status = tcgetattr(fd, c_loc(tio))
+        if (status /= 0) then
+            call perror("tcgetattr" // c_null_char)
+            return
+        end if
+
+        ! Disable ECHO and ECHONL flags
+        tio%c_lflag = iand(tio%c_lflag, not(ECHO))
+        tio%c_lflag = iand(tio%c_lflag, not(ECHONL))
+
+        ! Apply settings
+        status = tcsetattr(fd, TCSANOW, c_loc(tio))
+        if (status /= 0) then
+            call perror("tcsetattr" // c_null_char)
+        end if
+    end subroutine disable_pty_echo
 
     ! Get shell from environment
     subroutine get_shell_from_env(shell)
