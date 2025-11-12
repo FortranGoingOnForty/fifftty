@@ -32,6 +32,9 @@ module vt_parser
         integer :: current_bg = COLOR_DEFAULT
         integer :: current_attrs = 0
         type(c_ptr) :: pty_ptr = c_null_ptr  ! Pointer to PTY for sending responses
+        ! Saved cursor position for save/restore operations
+        integer :: saved_cursor_row = 0
+        integer :: saved_cursor_col = 0
     contains
         procedure :: reset => parser_reset
         procedure :: process_byte => parser_process_byte
@@ -395,8 +398,62 @@ contains
                 print '(A,I0)', "DEBUG: CSI n with param: ", parser%params(1)
             end if
 
+
+        case ('G')  ! CHA - Cursor Horizontal Absolute
+            col = 1
+            if (parser%num_params >= 1) col = max(1, parser%params(1))
+            call grid%move_cursor(grid%cursor_row, col)
+
+        case ('d')  ! VPA - Line Position Absolute
+            row = 1
+            if (parser%num_params >= 1) row = max(1, parser%params(1))
+            call grid%move_cursor(row, grid%cursor_col)
+
+        case ('P')  ! DCH - Delete Character
+            n = 1
+            if (parser%num_params >= 1) n = max(1, parser%params(1))
+            ! For now, just shift characters left
+            ! TODO: Implement proper character deletion
+
+        case ('@')  ! ICH - Insert Character
+            n = 1
+            if (parser%num_params >= 1) n = max(1, parser%params(1))
+            ! For now, just make space
+            ! TODO: Implement proper character insertion
+
+        case ('L')  ! IL - Insert Line
+            n = 1
+            if (parser%num_params >= 1) n = max(1, parser%params(1))
+            ! TODO: Implement line insertion
+
+        case ('M')  ! DL - Delete Line
+            n = 1
+            if (parser%num_params >= 1) n = max(1, parser%params(1))
+            ! TODO: Implement line deletion
+
+        case ('X')  ! ECH - Erase Character
+            n = 1
+            if (parser%num_params >= 1) n = max(1, parser%params(1))
+            ! Erase n characters from cursor position
+            do i = 0, n-1
+                if (grid%cursor_col + i <= grid%cols) then
+                    grid%cells(grid%cursor_row, grid%cursor_col + i)%codepoint = 32  ! Space
+                end if
+            end do
+
+        case ('s')  ! SCP - Save Cursor Position (non-standard but common)
+            parser%saved_cursor_row = grid%cursor_row
+            parser%saved_cursor_col = grid%cursor_col
+
+        case ('u')  ! RCP - Restore Cursor Position (non-standard but common)
+            if (parser%saved_cursor_row > 0 .and. parser%saved_cursor_col > 0) then
+                call grid%move_cursor(parser%saved_cursor_row, parser%saved_cursor_col)
+            end if
+
         case default
-            print '(A,A,A,20I0)', "DEBUG: Unhandled CSI ", final_byte, " params:", parser%params(1:min(parser%num_params, 20))
+            if (DEBUG_SEQUENCES) then
+                print '(A,A,A,20I0)', "DEBUG: Unhandled CSI ", final_byte, " params:", parser%params(1:min(parser%num_params, 20))
+            end if
         end select
     end subroutine execute_csi
 
