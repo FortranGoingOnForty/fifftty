@@ -610,7 +610,7 @@ contains
 
         ! Position cursor at bottom of cell, standard terminal behavior
         ! This will be cut off on the last row but that's acceptable
-        y = real(row * this%font_mgr%line_height - 1, GLfloat)  ! 1 pixel from bottom of cell (same as underline)
+        y = real(row * this%font_mgr%line_height - 2, GLfloat)  ! Start 2 pixels from bottom
         h = 2.0  ! 2 pixel thick cursor
 
         w = real(this%font_mgr%cell_advance, GLfloat)  ! Full cell width for cursor
