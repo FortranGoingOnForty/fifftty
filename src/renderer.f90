@@ -56,23 +56,23 @@ module renderer
     ! ANSI color palette (16 colors: 8 normal + 8 bright)
     ! Format: RGB values 0.0-1.0
     real(GLfloat), parameter :: COLOR_PALETTE(3, 16) = reshape([ &
-        ! Normal colors (0-7)
+        ! Normal colors (0-7) - darker for better bold contrast
         0.0, 0.0, 0.0,      & ! Black
-        0.8, 0.0, 0.0,      & ! Red
-        0.0, 0.8, 0.0,      & ! Green
-        0.8, 0.8, 0.0,      & ! Yellow
-        0.0, 0.0, 0.8,      & ! Blue
-        0.8, 0.0, 0.8,      & ! Magenta
-        0.0, 0.8, 0.8,      & ! Cyan
-        0.8, 0.8, 0.8,      & ! White
-        ! Bright colors (8-15)
-        0.5, 0.5, 0.5,      & ! Bright Black (Gray)
-        1.0, 0.0, 0.0,      & ! Bright Red
-        0.0, 1.0, 0.0,      & ! Bright Green
-        1.0, 1.0, 0.0,      & ! Bright Yellow
-        0.0, 0.0, 1.0,      & ! Bright Blue
-        1.0, 0.0, 1.0,      & ! Bright Magenta
-        0.0, 1.0, 1.0,      & ! Bright Cyan
+        0.6, 0.0, 0.0,      & ! Red (darker)
+        0.0, 0.6, 0.0,      & ! Green (darker)
+        0.6, 0.6, 0.0,      & ! Yellow (darker)
+        0.0, 0.0, 0.6,      & ! Blue (darker)
+        0.6, 0.0, 0.6,      & ! Magenta (darker)
+        0.0, 0.6, 0.6,      & ! Cyan (darker)
+        0.7, 0.7, 0.7,      & ! White (darker)
+        ! Bright colors (8-15) - noticeably brighter
+        0.4, 0.4, 0.4,      & ! Bright Black (Gray)
+        1.0, 0.2, 0.2,      & ! Bright Red
+        0.2, 1.0, 0.2,      & ! Bright Green
+        1.0, 1.0, 0.2,      & ! Bright Yellow
+        0.3, 0.3, 1.0,      & ! Bright Blue
+        1.0, 0.2, 1.0,      & ! Bright Magenta
+        0.2, 1.0, 1.0,      & ! Bright Cyan
         1.0, 1.0, 1.0       & ! Bright White
     ], shape(COLOR_PALETTE))
 
@@ -352,10 +352,6 @@ contains
         if (iand(attributes, ATTR_BOLD) /= 0) then
             if (actual_color >= 0 .and. actual_color <= 7) then
                 actual_color = actual_color + 8  ! Use bright variant
-                ! Debug blue rendering issue
-                if (fg_color == 4) then  ! Blue
-                    print '(A,I0,A,I0)', "DEBUG: Blue with bold: ", fg_color, " -> ", actual_color
-                end if
             end if
         end if
 
@@ -364,7 +360,8 @@ contains
         call glUniform3f(this%text_color_loc, r, g, b)
 
         ! Calculate screen position (top-left corner)
-        x = real((col - 1) * this%cell_width, GLfloat) + real(glyph%bearing_x, GLfloat)
+        ! Clamp x position to prevent glyphs from being cut off at cell boundaries
+        x = real((col - 1) * this%cell_width, GLfloat) + max(0.0, real(glyph%bearing_x, GLfloat))
         y = real((row - 1) * this%cell_height, GLfloat) + &
             real(this%cell_height - glyph%bearing_y, GLfloat)
         w = real(glyph%width, GLfloat)
@@ -402,19 +399,11 @@ contains
         if (iand(attributes, ATTR_BOLD) /= 0) then
             if (actual_color >= 0 .and. actual_color <= 7) then
                 actual_color = actual_color + 8
-                if (fg_color == 4) then  ! Debug blue
-                    print '(A,I0,A,I0)', "DEBUG: Blue underline with bold: ", fg_color, " -> ", actual_color
-                end if
             end if
         end if
 
         ! Convert color to RGB
         call get_ansi_color(actual_color, r, g, b)
-
-        ! Debug color values for blue
-        if (fg_color == 4 .or. actual_color == 12) then
-            print '(A,3F6.2)', "DEBUG: Blue RGB values: ", r, g, b
-        end if
 
         ! Calculate underline position (below character baseline)
         x = real((col - 1) * this%font_mgr%cell_advance, GLfloat)
