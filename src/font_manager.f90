@@ -187,16 +187,16 @@ contains
             success_count = success_count + 1
         end do
 
-        ! Add some padding
-        max_height = max_height + 2
-        total_width = total_width + 2
+        ! Add padding at the end (no need for padding at start since we begin at 0)
+        max_height = max_height + 1
+        total_width = total_width + 1
 
         ! Allocate atlas buffer (initialize to zero)
         allocate(atlas_buffer(total_width, max_height))
         atlas_buffer = 0
 
         ! Second pass: copy glyphs into atlas
-        current_x = 1
+        current_x = 0  ! Start at position 0, not 1, to avoid cutting off first pixel
         do i = 32, 126
             error = FT_Load_Char(this%ft_face, int(i, c_long), FT_LOAD_RENDER)
             if (error /= FT_Err_Ok) then
@@ -234,11 +234,29 @@ contains
             this%glyphs(i)%tex_height = real(bitmap%rows, GLfloat) / real(max_height, GLfloat)
             this%glyphs(i)%loaded = .true.
 
+            ! More debug output for B and R
+            if (i == 66 .or. i == 82) then
+                print '(A,A,A)', "  Atlas position for '", char(i), "':"
+                print '(A,I0,A,I0)', "    current_x=", current_x, " (pixel position in atlas)"
+                print '(A,F6.4,A,F6.4)', "    tex_x=", this%glyphs(i)%tex_x, " tex_width=", this%glyphs(i)%tex_width
+                print '(A,I0,A,I0)', "    atlas dimensions: width=", total_width, " height=", max_height
+            end if
+
             ! Copy bitmap data into atlas
             if (c_associated(bitmap%buffer) .and. bitmap%width > 0 .and. bitmap%rows > 0) then
                 call c_f_pointer(bitmap%buffer, bitmap_data, [bitmap%width * bitmap%rows])
-                call copy_glyph_to_atlas(atlas_buffer, bitmap_data, current_x, 1, &
+                call copy_glyph_to_atlas(atlas_buffer, bitmap_data, current_x, 0, &
                                         bitmap%width, bitmap%rows, total_width, max_height)
+
+                ! Debug: Check first and last column of B and R glyphs
+                if (i == 66 .or. i == 82) then
+                    print '(A,A,A)', "  Bitmap data for '", char(i), "':"
+                    print '(A,I0)', "    First column pixel values: ", bitmap_data(1)
+                    if (bitmap%width > 1) then
+                        print '(A,I0)', "    Second column pixel: ", bitmap_data(2)
+                    end if
+                    print '(A,I0)', "    Last column pixel: ", bitmap_data(bitmap%width)
+                end if
             end if
 
             current_x = current_x + bitmap%width + 1
@@ -259,10 +277,12 @@ contains
 
         do row = 1, height
             do col = 1, width
-                if (x + col - 1 <= atlas_width .and. y + row - 1 <= atlas_height) then
+                ! Adjust for 1-based Fortran arrays: x and y are 0-based positions
+                ! So we need to add 1 when indexing into the Fortran array
+                if (x + col <= atlas_width .and. y + row <= atlas_height) then
                     glyph_idx = (row - 1) * width + col
                     ! Convert signed char to unsigned value (0-255)
-                    atlas(x + col - 1, y + row - 1) = iand(int(glyph_data(glyph_idx)), 255)
+                    atlas(x + col, y + row) = iand(int(glyph_data(glyph_idx)), 255)
                 end if
             end do
         end do
