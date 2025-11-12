@@ -352,6 +352,10 @@ contains
         if (iand(attributes, ATTR_BOLD) /= 0) then
             if (actual_color >= 0 .and. actual_color <= 7) then
                 actual_color = actual_color + 8  ! Use bright variant
+                ! Debug blue rendering issue
+                if (fg_color == 4) then  ! Blue
+                    print '(A,I0,A,I0)', "DEBUG: Blue with bold: ", fg_color, " -> ", actual_color
+                end if
             end if
         end if
 
@@ -398,15 +402,23 @@ contains
         if (iand(attributes, ATTR_BOLD) /= 0) then
             if (actual_color >= 0 .and. actual_color <= 7) then
                 actual_color = actual_color + 8
+                if (fg_color == 4) then  ! Debug blue
+                    print '(A,I0,A,I0)', "DEBUG: Blue underline with bold: ", fg_color, " -> ", actual_color
+                end if
             end if
         end if
 
         ! Convert color to RGB
         call get_ansi_color(actual_color, r, g, b)
 
+        ! Debug color values for blue
+        if (fg_color == 4 .or. actual_color == 12) then
+            print '(A,3F6.2)', "DEBUG: Blue RGB values: ", r, g, b
+        end if
+
         ! Calculate underline position (below character baseline)
         x = real((col - 1) * this%font_mgr%cell_advance, GLfloat)
-        y = real((row - 1) * this%font_mgr%line_height + this%font_mgr%line_height - 2, GLfloat)  ! 2 pixels from bottom
+        y = real(row * this%font_mgr%line_height - 1, GLfloat)  ! 1 pixel from bottom of cell
         w = real(this%font_mgr%cell_advance, GLfloat)
         h = 1.0_GLfloat  ! 1 pixel thick line
 
