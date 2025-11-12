@@ -349,13 +349,15 @@ contains
 
         ! Apply bold effect by brightening color (colors 0-7 become 8-15)
         actual_color = fg_color
+
+        ! Handle COLOR_DEFAULT (256) - treat as white (7)
+        if (actual_color == COLOR_DEFAULT) then
+            actual_color = 7  ! Default to white
+        end if
+
         if (iand(attributes, ATTR_BOLD) /= 0) then
             if (actual_color >= 0 .and. actual_color <= 7) then
                 actual_color = actual_color + 8  ! Use bright variant
-            end if
-            ! Debug: Check if bold is being applied
-            if (codepoint == ichar('B')) then  ! 'B' in "Bold"
-                print '(A,I0,A,I0,A,Z8)', "DEBUG: Bold 'B' - color: ", fg_color, " -> ", actual_color, " attrs: ", attributes
             end if
         end if
 
@@ -364,10 +366,10 @@ contains
         call glUniform3f(this%text_color_loc, r, g, b)
 
         ! Calculate screen position (top-left corner)
-        ! Clamp x position to prevent glyphs from being cut off at cell boundaries
-        x = real((col - 1) * this%cell_width, GLfloat) + max(0.0, real(glyph%bearing_x, GLfloat))
-        y = real((row - 1) * this%cell_height, GLfloat) + &
-            real(this%cell_height - glyph%bearing_y, GLfloat)
+        ! Use cell_advance for consistent spacing, add small padding to avoid cutoff
+        x = real((col - 1) * this%font_mgr%cell_advance + 1, GLfloat) + real(glyph%bearing_x, GLfloat)
+        y = real((row - 1) * this%font_mgr%line_height, GLfloat) + &
+            real(this%font_mgr%line_height - glyph%bearing_y, GLfloat)
         w = real(glyph%width, GLfloat)
         h = real(glyph%height, GLfloat)
 
@@ -400,6 +402,12 @@ contains
 
         ! Apply bold effect to underline color too
         actual_color = fg_color
+
+        ! Handle COLOR_DEFAULT (256) - treat as white (7)
+        if (actual_color == COLOR_DEFAULT) then
+            actual_color = 7  ! Default to white
+        end if
+
         if (iand(attributes, ATTR_BOLD) /= 0) then
             if (actual_color >= 0 .and. actual_color <= 7) then
                 actual_color = actual_color + 8

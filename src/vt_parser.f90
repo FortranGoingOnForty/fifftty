@@ -485,7 +485,6 @@ contains
                 end if
             else if (param == 1) then
                 parser%current_attrs = ior(parser%current_attrs, ATTR_BOLD)
-                print '(A,Z8)', "DEBUG: Bold ON, attrs now = ", parser%current_attrs
             else if (param == 3) then
                 parser%current_attrs = ior(parser%current_attrs, ATTR_ITALIC)
             else if (param == 4) then
@@ -612,11 +611,6 @@ contains
         type(parser_t), intent(in) :: parser
         type(grid_t), intent(inout) :: grid
         integer, intent(in) :: codepoint
-
-        ! Debug bold attribute on 'B' character
-        if (codepoint == ichar('B') .and. parser%current_attrs /= 0) then
-            print '(A,Z8,A,I0)', "DEBUG: Writing 'B' with attrs: ", parser%current_attrs, " fg_color: ", parser%current_fg
-        end if
 
         ! Write character at cursor position
         call grid%set_cell(grid%cursor_row, grid%cursor_col, codepoint, &
