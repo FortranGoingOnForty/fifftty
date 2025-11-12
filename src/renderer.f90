@@ -322,6 +322,11 @@ contains
         if (iand(attributes, ATTR_BOLD) /= 0) then
             if (actual_color >= 0 .and. actual_color <= 7) then
                 actual_color = actual_color + 8  ! Use bright variant
+                ! Debug output
+                if (codepoint >= 65 .and. codepoint <= 90) then  ! A-Z for testing
+                    print '(A,A,A,I0,A,I0,A,I0)', "DEBUG: Bold char '", char(codepoint), "' color: ", &
+                          fg_color, " -> ", actual_color, " attrs=", attributes
+                end if
             end if
         end if
 
@@ -436,6 +441,8 @@ contains
             do col = 1, grid%cols
                 cell = grid%cells(col, row)  ! cells(col, row) not cells(row, col)
                 if (cell%codepoint > 0 .and. cell%codepoint /= 32) then
+                    ! Ensure font texture is bound for character rendering
+                    call glBindTexture(GL_TEXTURE_2D, this%font_mgr%atlas_texture)
                     call draw_character(this, cell%codepoint, row, col, cell%fg_color, cell%attributes)
                 end if
                 ! Draw underline if attribute is set
