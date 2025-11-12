@@ -40,11 +40,15 @@ link_directories(
     ${FREETYPE_LIBRARY_DIRS}
 )
 
-# Source files
-set(FORTTY_SOURCES
+# Core library sources (can be tested independently)
+set(FORTTY_LIB_SOURCES
     src/terminal_grid.f90
     src/pty_manager.f90
     src/vt_parser.f90
+)
+
+# Application sources (depend on core library)
+set(FORTTY_APP_SOURCES
     src/opengl_bindings.f90
     src/freetype_bindings.f90
     src/font_manager.f90
@@ -54,11 +58,15 @@ set(FORTTY_SOURCES
     src/main.f90
 )
 
-# Executable
-add_executable(fortty ${FORTTY_SOURCES})
+# Create core library for testing
+add_library(fortty_core STATIC ${FORTTY_LIB_SOURCES})
+
+# Main executable
+add_executable(fortty ${FORTTY_APP_SOURCES})
 
 # Link libraries
 target_link_libraries(fortty
+    fortty_core
     ${GTK4_LIBRARIES}
     ${FREETYPE_LIBRARIES}
     ${OPENGL_LIBRARIES}
@@ -66,6 +74,22 @@ target_link_libraries(fortty
 
 # Compiler definitions from GTK4
 add_definitions(${GTK4_CFLAGS_OTHER})
+
+# Enable testing
+enable_testing()
+
+# Test sources
+set(TEST_SOURCES
+    tests/test_framework.f90
+    tests/test_vt_parser.f90
+)
+
+# Test executable
+add_executable(test_vt_parser ${TEST_SOURCES})
+target_link_libraries(test_vt_parser fortty_core)
+
+# Add test to CTest
+add_test(NAME vt_parser_tests COMMAND test_vt_parser)
 
 # Install target
 install(TARGETS fortty DESTINATION bin)
