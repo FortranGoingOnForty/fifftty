@@ -361,17 +361,35 @@ contains
             end if
         end if
 
+        ! Debug color application for "Bold Red"
+        if (codepoint >= ichar('A') .and. codepoint <= ichar('Z') .and. fg_color == 1) then
+            print '(A,A,A,I0,A,I0)', "DEBUG: '", char(codepoint), "' red color: ", fg_color, " -> ", actual_color
+        end if
+
         ! Convert ANSI color index to RGB
         call get_ansi_color(actual_color, r, g, b)
         call glUniform3f(this%text_color_loc, r, g, b)
 
+        ! Debug RGB values for red colors
+        if (actual_color == 1 .or. actual_color == 9) then  ! Red or bright red
+            print '(A,I0,A,3F6.2)', "DEBUG: Red color ", actual_color, " RGB: ", r, g, b
+        end if
+
         ! Calculate screen position (top-left corner)
-        ! Use cell_advance for consistent spacing, add small padding to avoid cutoff
-        x = real((col - 1) * this%font_mgr%cell_advance + 1, GLfloat) + real(glyph%bearing_x, GLfloat)
+        ! Center glyphs in their cells to avoid cutoff
+        ! Calculate cell center, then offset by half glyph width
+        x = real((col - 1) * this%font_mgr%cell_advance, GLfloat) + &
+            real((this%font_mgr%cell_advance - glyph%width) / 2, GLfloat)
         y = real((row - 1) * this%font_mgr%line_height, GLfloat) + &
             real(this%font_mgr%line_height - glyph%bearing_y, GLfloat)
         w = real(glyph%width, GLfloat)
         h = real(glyph%height, GLfloat)
+
+        ! Debug glyph positioning for B and R
+        if (codepoint == ichar('B') .or. codepoint == ichar('R')) then
+            print '(A,A,A,F6.1,A,I0,A,I0)', "DEBUG: '", char(codepoint), "' x=", x, &
+                  " bearing_x=", glyph%bearing_x, " width=", glyph%width
+        end if
 
         ! Build vertex data: Position (x,y) + TexCoord (s,t)
         ! Triangle strip: bottom-left, bottom-right, top-left, top-right
@@ -419,7 +437,7 @@ contains
 
         ! Calculate underline position (below character baseline)
         x = real((col - 1) * this%font_mgr%cell_advance, GLfloat)
-        y = real(row * this%font_mgr%line_height - 1, GLfloat)  ! 1 pixel from bottom of cell
+        y = real(row * this%font_mgr%line_height - 2, GLfloat)  ! 2 pixels from bottom of cell
         w = real(this%font_mgr%cell_advance, GLfloat)
         h = 1.0_GLfloat  ! 1 pixel thick line
 
@@ -514,10 +532,11 @@ contains
         integer(c_size_t) :: vertex_size
 
         ! Calculate cursor position (underline style)
-        x = real((col - 1) * this%cell_width, GLfloat)
-        y = real(row * this%cell_height - 4, GLfloat)  ! 4 pixels from bottom to avoid cutoff
-        w = real(this%cell_width, GLfloat)
-        h = 2.0  ! 2-pixel thick underline
+        ! Use font metrics for consistent positioning
+        x = real((col - 1) * this%font_mgr%cell_advance, GLfloat)
+        y = real(row * this%font_mgr%line_height - 3, GLfloat)  ! 3 pixels from bottom to ensure visibility
+        w = real(this%font_mgr%cell_advance, GLfloat)
+        h = 3.0  ! 3-pixel thick underline for better visibility
 
         ! Set cursor color (bright green)
         call glUniform3f(this%text_color_loc, 0.0, 1.0, 0.0)
