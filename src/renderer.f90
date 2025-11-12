@@ -305,19 +305,28 @@ contains
     end subroutine renderer_resize
 
     ! Draw a single character at grid position
-    subroutine draw_character(this, codepoint, row, col, fg_color)
+    subroutine draw_character(this, codepoint, row, col, fg_color, attributes)
         class(renderer_t), intent(inout) :: this
-        integer, intent(in) :: codepoint, row, col, fg_color
+        integer, intent(in) :: codepoint, row, col, fg_color, attributes
         type(glyph_info_t) :: glyph
         real(GLfloat) :: x, y, w, h, r, g, b
         real(GLfloat), target :: vertices(16)  ! 4 vertices * (2 pos + 2 tex)
         integer(c_size_t) :: vertex_size
+        integer :: actual_color
 
         ! Get glyph from font manager
         glyph = this%font_mgr%get_glyph(codepoint)
 
+        ! Apply bold effect by brightening color (colors 0-7 become 8-15)
+        actual_color = fg_color
+        if (iand(attributes, ATTR_BOLD) /= 0) then
+            if (actual_color >= 0 .and. actual_color <= 7) then
+                actual_color = actual_color + 8  ! Use bright variant
+            end if
+        end if
+
         ! Convert ANSI color index to RGB
-        call get_ansi_color(fg_color, r, g, b)
+        call get_ansi_color(actual_color, r, g, b)
         call glUniform3f(this%text_color_loc, r, g, b)
 
         if (.not. glyph%loaded) return
@@ -380,7 +389,7 @@ contains
             do col = 1, grid%cols
                 cell = grid%cells(col, row)  ! cells(col, row) not cells(row, col)
                 if (cell%codepoint > 0 .and. cell%codepoint /= 32) then
-                    call draw_character(this, cell%codepoint, row, col, cell%fg_color)
+                    call draw_character(this, cell%codepoint, row, col, cell%fg_color, cell%attributes)
                 end if
             end do
         end do
