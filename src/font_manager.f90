@@ -216,9 +216,16 @@ contains
             ! Store glyph info
             this%glyphs(i)%width = bitmap%width
             this%glyphs(i)%height = bitmap%rows
+            ! Keep original bearing values
             this%glyphs(i)%bearing_x = glyph%bitmap_left
             this%glyphs(i)%bearing_y = glyph%bitmap_top
             this%glyphs(i)%advance = int(glyph%advance%x / 64)  ! Convert from 26.6 fixed point
+
+            ! Debug output for B and R characters
+            if (i == 66 .or. i == 82) then  ! ASCII codes for 'B' and 'R'
+                print '(A,A,A,I0,A,I0,A,I0)', "DEBUG: Character '", char(i), "' bearing_x=", &
+                    glyph%bitmap_left, " width=", bitmap%width, " advance=", this%glyphs(i)%advance
+            end if
 
             ! Texture coordinates (normalized to 0-1)
             this%glyphs(i)%tex_x = real(current_x, GLfloat) / real(total_width, GLfloat)

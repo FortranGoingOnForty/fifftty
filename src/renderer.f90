@@ -366,16 +366,13 @@ contains
         call glUniform3f(this%text_color_loc, r, g, b)
 
         ! Calculate screen position (top-left corner)
-        ! Center glyphs in cell with proper bearing adjustment
-        x = real((col - 1) * this%font_mgr%cell_advance, GLfloat)
-        ! For negative bearing (like B, R), shift right to prevent cutoff
-        ! For positive bearing, use as-is
-        if (glyph%bearing_x < 0) then
-            ! Negative bearing means glyph extends left, so don't apply it to prevent cutoff
-            x = x + 2.0  ! Small padding from left edge
-        else
-            x = x + real(glyph%bearing_x, GLfloat) + 2.0
-        end if
+        ! Base position at cell boundary with padding to prevent cutoff
+        ! Use a much larger padding area for glyphs with negative bearings
+        ! Some fonts have bearings as large as -5 to -10 pixels
+        x = real((col - 1) * this%font_mgr%cell_advance + 20, GLfloat)
+
+        ! Add bearing offset (can be negative, which moves glyph left into padding area)
+        x = x + real(glyph%bearing_x, GLfloat)
         y = real((row - 1) * this%font_mgr%line_height, GLfloat) + &
             real(this%font_mgr%line_height - glyph%bearing_y, GLfloat)
         w = real(glyph%width, GLfloat)
@@ -483,7 +480,8 @@ contains
 
         ! Calculate underline position for a continuous line
         ! Start at the beginning of start_col, end at the end of end_col
-        x = real((start_col - 1) * this%font_mgr%cell_advance, GLfloat)  ! No padding for continuous line
+        ! Include 20-pixel padding to align with text
+        x = real((start_col - 1) * this%font_mgr%cell_advance + 20, GLfloat)
 
         ! Use proper font metrics for underline positioning (like Alacritty/Kitty)
         ! Position underline relative to baseline using font's underline metrics
@@ -606,7 +604,8 @@ contains
 
         ! Calculate cursor position (underline style)
         ! Use font metrics for consistent positioning
-        x = real((col - 1) * this%font_mgr%cell_advance, GLfloat)
+        ! Include 20-pixel padding to align with text
+        x = real((col - 1) * this%font_mgr%cell_advance + 20, GLfloat)
 
         ! Position cursor at bottom of cell, standard terminal behavior
         ! This will be cut off on the last row but that's acceptable
