@@ -457,14 +457,20 @@ contains
         do row = 1, grid%rows
             do col = 1, grid%cols
                 cell = grid%cells(col, row)  ! cells(col, row) not cells(row, col)
-                if (cell%codepoint > 0 .and. cell%codepoint /= 32) then
-                    ! Ensure font texture is bound for character rendering
-                    call glBindTexture(GL_TEXTURE_2D, this%font_mgr%atlas_texture)
-                    call draw_character(this, cell%codepoint, row, col, cell%fg_color, cell%attributes)
-                end if
-                ! Draw underline if attribute is set
-                if (iand(cell%attributes, ATTR_UNDERLINE) /= 0) then
-                    call draw_underline(this, row, col, cell%fg_color, cell%attributes)
+
+                ! Skip completely empty cells (codepoint 0)
+                if (cell%codepoint > 0) then
+                    ! Draw visible characters (not spaces)
+                    if (cell%codepoint /= 32) then
+                        ! Ensure font texture is bound for character rendering
+                        call glBindTexture(GL_TEXTURE_2D, this%font_mgr%atlas_texture)
+                        call draw_character(this, cell%codepoint, row, col, cell%fg_color, cell%attributes)
+                    end if
+
+                    ! Draw underline for any initialized cell with underline attribute (including spaces)
+                    if (iand(cell%attributes, ATTR_UNDERLINE) /= 0) then
+                        call draw_underline(this, row, col, cell%fg_color, cell%attributes)
+                    end if
                 end if
             end do
         end do

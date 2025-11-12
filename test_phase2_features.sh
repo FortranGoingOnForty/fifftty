@@ -40,3 +40,6 @@ echo "✓ Bold text appears brighter"
 echo "✓ Underlines are visible"
 echo "✓ Arrow keys work without stray characters"
 echo "✓ All 16 colors display correctly"
+
+# Reset all attributes to prevent them from persisting
+echo -en "\033[0m"

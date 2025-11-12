@@ -480,12 +480,18 @@ contains
                 parser%current_fg = COLOR_DEFAULT
                 parser%current_bg = COLOR_DEFAULT
                 parser%current_attrs = 0
+                if (DEBUG_SEQUENCES) then
+                    print '(A)', "DEBUG: SGR reset - all attributes cleared"
+                end if
             else if (param == 1) then
                 parser%current_attrs = ior(parser%current_attrs, ATTR_BOLD)
             else if (param == 3) then
                 parser%current_attrs = ior(parser%current_attrs, ATTR_ITALIC)
             else if (param == 4) then
                 parser%current_attrs = ior(parser%current_attrs, ATTR_UNDERLINE)
+                if (DEBUG_SEQUENCES) then
+                    print '(A,Z8)', "DEBUG: Underline ON, attrs now = ", parser%current_attrs
+                end if
             else if (param == 7) then
                 parser%current_attrs = ior(parser%current_attrs, ATTR_REVERSE)
             else if (param == 22) then
@@ -494,6 +500,9 @@ contains
                 parser%current_attrs = iand(parser%current_attrs, not(ATTR_ITALIC))
             else if (param == 24) then
                 parser%current_attrs = iand(parser%current_attrs, not(ATTR_UNDERLINE))
+                if (DEBUG_SEQUENCES) then
+                    print '(A,Z8)', "DEBUG: Underline OFF, attrs now = ", parser%current_attrs
+                end if
             else if (param == 27) then
                 parser%current_attrs = iand(parser%current_attrs, not(ATTR_REVERSE))
             else if (param >= 30 .and. param <= 37) then
