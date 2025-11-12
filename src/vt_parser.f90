@@ -6,7 +6,7 @@ module vt_parser
     private
 
     ! Debug flag for escape sequence logging
-    logical, parameter :: DEBUG_SEQUENCES = .false.
+    logical, parameter :: DEBUG_SEQUENCES = .true.
 
     ! Parser states (VT100/ANSI state machine)
     integer, parameter, public :: STATE_GROUND = 0
@@ -97,6 +97,34 @@ contains
         character(len=*), intent(in) :: buffer
         integer, intent(in) :: length
         integer :: i, byte
+        character(len=512) :: hex_dump
+        integer :: hex_pos
+
+        ! Build hex dump of entire buffer for debugging
+        if (DEBUG_SEQUENCES .and. length > 0) then
+            hex_dump = ""
+            hex_pos = 1
+            do i = 1, min(length, 50)  ! Limit to first 50 bytes for readability
+                byte = ichar(buffer(i:i))
+                write(hex_dump(hex_pos:hex_pos+3), '(Z2.2,A)') byte, " "
+                hex_pos = hex_pos + 3
+
+                ! Add readable char representation
+                if (byte >= 32 .and. byte <= 126) then
+                    hex_dump(hex_pos:hex_pos) = char(byte)
+                else if (byte == 27) then
+                    hex_dump(hex_pos:hex_pos) = "␛"  ! ESC symbol
+                else if (byte == 10) then
+                    hex_dump(hex_pos:hex_pos) = "␤"  ! LF symbol
+                else if (byte == 13) then
+                    hex_dump(hex_pos:hex_pos) = "␍"  ! CR symbol
+                else
+                    hex_dump(hex_pos:hex_pos) = "·"
+                end if
+                hex_pos = hex_pos + 2
+            end do
+            print '(A,I0,A)', "PTY_RECV[", length, " bytes]: " // trim(hex_dump)
+        end if
 
         do i = 1, length
             byte = ichar(buffer(i:i))

@@ -297,9 +297,14 @@ contains
 
         ! Make this the controlling terminal for the session
         ! This is critical for zsh to recognize it as an interactive terminal
-        if (ioctl(slave_fd, TIOCSCTTY, c_null_ptr) < 0) then
-            print *, "Warning: Failed to set controlling terminal (TIOCSCTTY)"
-            ! Continue anyway, some systems don't require this
+        ! On macOS, TIOCSCTTY might need a non-zero force parameter
+        if (ioctl(slave_fd, TIOCSCTTY, transfer(1_c_int, c_null_ptr)) < 0) then
+            ! Try again without force flag
+            if (ioctl(slave_fd, TIOCSCTTY, c_null_ptr) < 0) then
+                ! Some systems don't require this, but log the error
+                ! Note: Must print before dup2 redirects stdout!
+                write(2, '(A)') "Warning: Failed to set controlling terminal (TIOCSCTTY)"
+            end if
         end if
 
         ! Redirect stdin, stdout, stderr to slave PTY
@@ -335,9 +340,9 @@ contains
 
         ! Set TERM environment variable so shell knows terminal capabilities
         if (setenv("TERM" // c_null_char, "xterm-256color" // c_null_char, 1) /= 0) then
-            print *, "ERROR: Failed to set TERM environment variable"
+            write(2, '(A)') "ERROR: Failed to set TERM environment variable"
         else
-            print *, "DEBUG: Set TERM=xterm-256color for child shell"
+            write(2, '(A)') "DEBUG: Set TERM=xterm-256color for child shell"
         end if
 
         ! Set COLUMNS and LINES to help shell understand terminal size
