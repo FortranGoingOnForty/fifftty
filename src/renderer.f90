@@ -361,35 +361,18 @@ contains
             end if
         end if
 
-        ! Debug color application for "Bold Red"
-        if (codepoint >= ichar('A') .and. codepoint <= ichar('Z') .and. fg_color == 1) then
-            print '(A,A,A,I0,A,I0)', "DEBUG: '", char(codepoint), "' red color: ", fg_color, " -> ", actual_color
-        end if
-
         ! Convert ANSI color index to RGB
         call get_ansi_color(actual_color, r, g, b)
         call glUniform3f(this%text_color_loc, r, g, b)
 
-        ! Debug RGB values for red colors
-        if (actual_color == 1 .or. actual_color == 9) then  ! Red or bright red
-            print '(A,I0,A,3F6.2)', "DEBUG: Red color ", actual_color, " RGB: ", r, g, b
-        end if
-
         ! Calculate screen position (top-left corner)
-        ! Center glyphs in their cells to avoid cutoff
-        ! Calculate cell center, then offset by half glyph width
-        x = real((col - 1) * this%font_mgr%cell_advance, GLfloat) + &
-            real((this%font_mgr%cell_advance - glyph%width) / 2, GLfloat)
+        ! Add 2 pixel padding from left edge to prevent cutoff
+        x = real((col - 1) * this%font_mgr%cell_advance + 2, GLfloat) + &
+            max(0.0, real(glyph%bearing_x, GLfloat))
         y = real((row - 1) * this%font_mgr%line_height, GLfloat) + &
             real(this%font_mgr%line_height - glyph%bearing_y, GLfloat)
         w = real(glyph%width, GLfloat)
         h = real(glyph%height, GLfloat)
-
-        ! Debug glyph positioning for B and R
-        if (codepoint == ichar('B') .or. codepoint == ichar('R')) then
-            print '(A,A,A,F6.1,A,I0,A,I0)', "DEBUG: '", char(codepoint), "' x=", x, &
-                  " bearing_x=", glyph%bearing_x, " width=", glyph%width
-        end if
 
         ! Build vertex data: Position (x,y) + TexCoord (s,t)
         ! Triangle strip: bottom-left, bottom-right, top-left, top-right
@@ -436,9 +419,10 @@ contains
         call get_ansi_color(actual_color, r, g, b)
 
         ! Calculate underline position (below character baseline)
-        x = real((col - 1) * this%font_mgr%cell_advance, GLfloat)
+        ! Match the 2px padding used for characters
+        x = real((col - 1) * this%font_mgr%cell_advance + 2, GLfloat)
         y = real(row * this%font_mgr%line_height - 2, GLfloat)  ! 2 pixels from bottom of cell
-        w = real(this%font_mgr%cell_advance, GLfloat)
+        w = real(this%font_mgr%cell_advance - 4, GLfloat)  ! Reduce width to account for padding
         h = 1.0_GLfloat  ! 1 pixel thick line
 
         ! Use white texture and color it with the text color
@@ -533,8 +517,16 @@ contains
 
         ! Calculate cursor position (underline style)
         ! Use font metrics for consistent positioning
+        ! Position cursor higher when at bottom of screen to ensure visibility
         x = real((col - 1) * this%font_mgr%cell_advance, GLfloat)
-        y = real(row * this%font_mgr%line_height - 3, GLfloat)  ! 3 pixels from bottom to ensure visibility
+
+        ! Check if cursor is near bottom of window
+        if (row * this%font_mgr%line_height > this%window_height - 10) then
+            y = real((row - 1) * this%font_mgr%line_height + this%font_mgr%line_height - 5, GLfloat)
+        else
+            y = real(row * this%font_mgr%line_height - 3, GLfloat)
+        end if
+
         w = real(this%font_mgr%cell_advance, GLfloat)
         h = 3.0  ! 3-pixel thick underline for better visibility
 
