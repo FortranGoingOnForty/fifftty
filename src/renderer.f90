@@ -366,9 +366,14 @@ contains
         call glUniform3f(this%text_color_loc, r, g, b)
 
         ! Calculate screen position (top-left corner)
-        ! Add 2 pixel padding from left edge to prevent cutoff
-        x = real((col - 1) * this%font_mgr%cell_advance + 2, GLfloat) + &
-            max(0.0, real(glyph%bearing_x, GLfloat))
+        ! Add padding from left edge to prevent cutoff, accounting for negative bearing
+        ! If bearing_x is negative, add extra padding to compensate
+        if (glyph%bearing_x < 0) then
+            x = real((col - 1) * this%font_mgr%cell_advance + 4, GLfloat)  ! Extra padding for negative bearing
+        else
+            x = real((col - 1) * this%font_mgr%cell_advance + 2, GLfloat) + &
+                real(glyph%bearing_x, GLfloat)
+        end if
         y = real((row - 1) * this%font_mgr%line_height, GLfloat) + &
             real(this%font_mgr%line_height - glyph%bearing_y, GLfloat)
         w = real(glyph%width, GLfloat)
@@ -517,17 +522,20 @@ contains
 
         ! Calculate cursor position (underline style)
         ! Use font metrics for consistent positioning
-        ! Position cursor higher when at bottom of screen to ensure visibility
-        x = real((col - 1) * this%font_mgr%cell_advance, GLfloat)
+        ! Match the padding used for characters
+        x = real((col - 1) * this%font_mgr%cell_advance + 2, GLfloat)
 
-        ! Check if cursor is near bottom of window
-        if (row * this%font_mgr%line_height > this%window_height - 10) then
-            y = real((row - 1) * this%font_mgr%line_height + this%font_mgr%line_height - 5, GLfloat)
-        else
-            y = real(row * this%font_mgr%line_height - 3, GLfloat)
+        ! Always position cursor 3 pixels from bottom of cell
+        ! Check if cursor would be outside visible area
+        y = real(row * this%font_mgr%line_height - 3, GLfloat)
+
+        ! If cursor is at or beyond bottom edge, move it up
+        if (y + 3.0 >= this%window_height) then
+            ! Position cursor higher up within the cell
+            y = real(row * this%font_mgr%line_height - 8, GLfloat)
         end if
 
-        w = real(this%font_mgr%cell_advance, GLfloat)
+        w = real(this%font_mgr%cell_advance - 4, GLfloat)  ! Account for padding on both sides
         h = 3.0  ! 3-pixel thick underline for better visibility
 
         ! Set cursor color (bright green)
