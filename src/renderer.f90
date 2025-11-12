@@ -353,6 +353,10 @@ contains
             if (actual_color >= 0 .and. actual_color <= 7) then
                 actual_color = actual_color + 8  ! Use bright variant
             end if
+            ! Debug: Check if bold is being applied
+            if (codepoint == ichar('B')) then  ! 'B' in "Bold"
+                print '(A,I0,A,I0,A,Z8)', "DEBUG: Bold 'B' - color: ", fg_color, " -> ", actual_color, " attrs: ", attributes
+            end if
         end if
 
         ! Convert ANSI color index to RGB
@@ -503,7 +507,7 @@ contains
 
         ! Calculate cursor position (underline style)
         x = real((col - 1) * this%cell_width, GLfloat)
-        y = real(row * this%cell_height - 2, GLfloat)  ! Near bottom of cell
+        y = real(row * this%cell_height - 4, GLfloat)  ! 4 pixels from bottom to avoid cutoff
         w = real(this%cell_width, GLfloat)
         h = 2.0  ! 2-pixel thick underline
 
