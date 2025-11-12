@@ -5,6 +5,9 @@ module vt_parser
     implicit none
     private
 
+    ! Debug flag for escape sequence logging
+    logical, parameter :: DEBUG_SEQUENCES = .true.
+
     ! Parser states (VT100/ANSI state machine)
     integer, parameter, public :: STATE_GROUND = 0
     integer, parameter, public :: STATE_ESCAPE = 1
@@ -127,6 +130,14 @@ contains
         type(parser_t), intent(inout) :: parser
         type(grid_t), intent(inout) :: grid
         integer, intent(in) :: byte
+
+        if (DEBUG_SEQUENCES) then
+            if (byte >= 32 .and. byte <= 126) then
+                print '(A,A,A,I0,A)', "DEBUG: ESC ", char(byte), " (", byte, ")"
+            else
+                print '(A,I0,A,Z2.2)', "DEBUG: ESC + byte ", byte, " (0x", byte, ")"
+            end if
+        end if
 
         if (byte == 91) then  ! '[' - CSI sequence
             parser%state = STATE_CSI_ENTRY
@@ -283,11 +294,26 @@ contains
 
         integer :: n, row, col
         character(len=32) :: response
+        character(len=128) :: param_str
+        integer :: i
+
+        ! Build parameter string for debug output
+        if (DEBUG_SEQUENCES .and. parser%num_params > 0) then
+            write(param_str, '(20(I0,:,";"))') parser%params(1:min(parser%num_params, 20))
+        else
+            param_str = ""
+        end if
 
         ! Phase 1: Ignore DEC private mode sequences (ESC[?...)
         if (parser%private_mode) then
-            print '(A,A,A,20I0)', "DEBUG: Ignored CSI? ", final_byte, " params:", parser%params(1:min(parser%num_params, 20))
+            if (DEBUG_SEQUENCES) then
+                print '(A,A,A,A,A)', "DEBUG: CSI ? ", trim(param_str), " ", final_byte, " (DEC private mode)"
+            end if
             return
+        end if
+
+        if (DEBUG_SEQUENCES) then
+            print '(A,A,A,A)', "DEBUG: CSI ", trim(param_str), " ", final_byte
         end if
 
         select case (final_byte)
@@ -328,7 +354,9 @@ contains
 
         case ('c')  ! DA - Device Attributes
             ! Send VT100 response: ESC [ ? 1 ; 2 c
-            print '(A)', "DEBUG: Received CSI c (Device Attributes query), sending VT100 response"
+            if (DEBUG_SEQUENCES) then
+                print '(A)', "IMPORTANT: Received CSI c (Device Attributes), sending ESC[?1;2c"
+            end if
             call send_response(parser, char(27) // "[?1;2c")
 
         case ('n')  ! DSR - Device Status Report
@@ -336,9 +364,13 @@ contains
                 ! CPR - Cursor Position Report: ESC [ row ; col R
                 write(response, '(A,I0,A,I0,A)') char(27) // "[", &
                       grid%cursor_row, ";", grid%cursor_col, "R"
-                print '(A,I0,A,I0,A)', "DEBUG: Received CSI 6 n (cursor position query), reporting: row=", &
-                      grid%cursor_row, ", col=", grid%cursor_col
+                if (DEBUG_SEQUENCES) then
+                    print '(A,I0,A,I0)', "IMPORTANT: Received CSI 6 n, sending cursor position: ", &
+                          grid%cursor_row, ",", grid%cursor_col
+                end if
                 call send_response(parser, trim(response))
+            else if (DEBUG_SEQUENCES .and. parser%num_params >= 1) then
+                print '(A,I0)', "DEBUG: CSI n with param: ", parser%params(1)
             end if
 
         case default
@@ -489,19 +521,29 @@ contains
         character(len=*), intent(in) :: response
         type(pty_t), pointer :: pty
         integer :: bytes_written
+        integer :: i
+        character(len=256) :: hex_str
 
         if (.not. c_associated(parser%pty_ptr)) then
-            print '(A)', "DEBUG: ERROR - PTY not associated with parser!"
+            print '(A)', "ERROR: PTY not associated with parser!"
             return
         end if
 
         call c_f_pointer(parser%pty_ptr, pty)
         bytes_written = pty%write(response, len_trim(response))
 
-        if (bytes_written < 0) then
-            print '(A)', "DEBUG: Failed to send response to PTY"
-        else
-            print '(A,I0,A)', "DEBUG: Successfully sent ", bytes_written, " bytes to PTY"
+        if (DEBUG_SEQUENCES) then
+            ! Build hex string for debugging
+            hex_str = ""
+            do i = 1, min(len_trim(response), 20)
+                write(hex_str(i*3-2:i*3), '(Z2.2,1X)') ichar(response(i:i))
+            end do
+
+            if (bytes_written < 0) then
+                print '(A)', "ERROR: Failed to send response to PTY"
+            else
+                print '(A,I0,A,A)', "SENT TO PTY: ", bytes_written, " bytes: ", trim(hex_str)
+            end if
         end if
     end subroutine send_response
 
