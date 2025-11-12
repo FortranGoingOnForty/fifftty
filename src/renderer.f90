@@ -2,7 +2,7 @@ module renderer
     use, intrinsic :: iso_c_binding
     use opengl_bindings
     use font_manager
-    use terminal_grid
+    use terminal_grid  ! Imports ATTR_BOLD, ATTR_UNDERLINE, etc.
     implicit none
     private
 
@@ -357,6 +357,53 @@ contains
         call glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
     end subroutine draw_character
 
+    ! Draw underline for a character position
+    subroutine draw_underline(this, row, col, fg_color, attributes)
+        class(renderer_t), intent(inout) :: this
+        integer, intent(in) :: row, col, fg_color, attributes
+        real(GLfloat) :: x, y, w, h, r, g, b
+        real(GLfloat), target :: vertices(16)  ! 4 vertices * (2 pos + 2 tex)
+        integer :: actual_color
+
+        ! Apply bold effect to underline color too
+        actual_color = fg_color
+        if (iand(attributes, ATTR_BOLD) /= 0) then
+            if (actual_color >= 0 .and. actual_color <= 7) then
+                actual_color = actual_color + 8
+            end if
+        end if
+
+        ! Convert color to RGB
+        call get_ansi_color(actual_color, r, g, b)
+
+        ! Calculate underline position (below character baseline)
+        x = real((col - 1) * this%font_mgr%cell_advance, GLfloat)
+        y = real((row - 1) * this%font_mgr%line_height + this%font_mgr%line_height - 2, GLfloat)  ! 2 pixels from bottom
+        w = real(this%font_mgr%cell_advance, GLfloat)
+        h = 1.0_GLfloat  ! 1 pixel thick line
+
+        ! Use white texture and color it with the text color
+        call glBindTexture(GL_TEXTURE_2D, this%white_texture)
+        call glUniform3f(this%text_color_loc, r, g, b)
+
+        ! Set up vertices for a thin horizontal quad (underline)
+        vertices = [ &
+            x,     y,     0.0_GLfloat, 0.0_GLfloat, &  ! Bottom-left
+            x + w, y,     1.0_GLfloat, 0.0_GLfloat, &  ! Bottom-right
+            x,     y + h, 0.0_GLfloat, 1.0_GLfloat, &  ! Top-left
+            x + w, y + h, 1.0_GLfloat, 1.0_GLfloat  &  ! Top-right
+        ]
+
+        ! Draw as a quad
+        call glBindVertexArray(this%vao)
+        call glBindBuffer(GL_ARRAY_BUFFER, this%vbo)
+        call glBufferData(GL_ARRAY_BUFFER, &
+                         int(16 * 4, c_size_t), &  ! 16 floats * 4 bytes
+                         c_loc(vertices), GL_DYNAMIC_DRAW)
+        call glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
+        call glBindVertexArray(0)
+    end subroutine draw_underline
+
     ! Draw terminal grid
     subroutine renderer_draw_grid(this, grid)
         class(renderer_t), intent(inout) :: this
@@ -390,6 +437,10 @@ contains
                 cell = grid%cells(col, row)  ! cells(col, row) not cells(row, col)
                 if (cell%codepoint > 0 .and. cell%codepoint /= 32) then
                     call draw_character(this, cell%codepoint, row, col, cell%fg_color, cell%attributes)
+                end if
+                ! Draw underline if attribute is set
+                if (iand(cell%attributes, ATTR_UNDERLINE) /= 0) then
+                    call draw_underline(this, row, col, cell%fg_color, cell%attributes)
                 end if
             end do
         end do
