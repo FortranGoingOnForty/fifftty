@@ -29,6 +29,11 @@ module font_manager
         integer :: font_size = 16
         integer :: line_height = 0      ! Actual line height from font metrics
         integer :: cell_advance = 0     ! Cell width (max advance)
+        integer :: baseline = 0         ! Baseline position in pixels
+        integer :: ascender = 0         ! Ascender height in pixels
+        integer :: descender = 0        ! Descender depth in pixels (negative)
+        integer :: underline_position = 0  ! Underline position from baseline (negative)
+        integer :: underline_thickness = 1 ! Underline thickness in pixels
         type(glyph_info_t) :: glyphs(0:MAX_GLYPHS-1)
     contains
         procedure :: init => font_mgr_init
@@ -100,8 +105,12 @@ contains
         class(font_mgr_t), intent(inout) :: this
         type(FT_FaceRec), pointer :: face_rec
         integer(c_long) :: height_26_6
+        real :: scale_factor
 
         call c_f_pointer(this%ft_face, face_rec)
+
+        ! Calculate scaling factor from font units to pixels
+        scale_factor = real(this%font_size) / real(face_rec%units_per_EM)
 
         ! For terminals, line_height = (ascender - descender) in pixels
         ! FreeType stores metrics in 26.6 fixed-point format after FT_Set_Pixel_Sizes
@@ -118,6 +127,29 @@ contains
         this%cell_advance = int((int(face_rec%max_advance_width, c_long) * &
                             int(this%font_size, c_long)) / &
                             int(face_rec%units_per_EM, c_long))
+
+        ! Extract font metrics for proper text decoration positioning
+        ! These are in font units, need to scale to pixels
+        this%ascender = int(face_rec%ascender * scale_factor)
+        this%descender = int(face_rec%descender * scale_factor)  ! Usually negative
+
+        ! Calculate baseline position within cell (text sits on baseline)
+        ! Baseline is typically at ascender height from top of cell
+        this%baseline = this%ascender
+
+        ! Extract underline metrics - these are relative to baseline
+        ! underline_position is typically negative (below baseline)
+        this%underline_position = int(face_rec%underline_position * scale_factor)
+        this%underline_thickness = max(1, int(face_rec%underline_thickness * scale_factor))
+
+        ! If underline metrics are not set (0), use sensible defaults
+        if (this%underline_position == 0) then
+            ! Position underline at 1/8 of line height below baseline
+            this%underline_position = -this%line_height / 8
+        end if
+        if (this%underline_thickness == 0) then
+            this%underline_thickness = 1
+        end if
     end subroutine calculate_font_metrics
 
     ! Create texture atlas with all ASCII glyphs

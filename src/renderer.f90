@@ -366,13 +366,15 @@ contains
         call glUniform3f(this%text_color_loc, r, g, b)
 
         ! Calculate screen position (top-left corner)
-        ! Add padding from left edge to prevent cutoff, accounting for negative bearing
-        ! If bearing_x is negative, add extra padding to compensate
+        ! Center glyphs in cell with proper bearing adjustment
+        x = real((col - 1) * this%font_mgr%cell_advance, GLfloat)
+        ! For negative bearing (like B, R), shift right to prevent cutoff
+        ! For positive bearing, use as-is
         if (glyph%bearing_x < 0) then
-            x = real((col - 1) * this%font_mgr%cell_advance + 4, GLfloat)  ! Extra padding for negative bearing
+            ! Negative bearing means glyph extends left, so don't apply it to prevent cutoff
+            x = x + 2.0  ! Small padding from left edge
         else
-            x = real((col - 1) * this%font_mgr%cell_advance + 2, GLfloat) + &
-                real(glyph%bearing_x, GLfloat)
+            x = x + real(glyph%bearing_x, GLfloat) + 2.0
         end if
         y = real((row - 1) * this%font_mgr%line_height, GLfloat) + &
             real(this%font_mgr%line_height - glyph%bearing_y, GLfloat)
@@ -423,11 +425,13 @@ contains
         ! Convert color to RGB
         call get_ansi_color(actual_color, r, g, b)
 
-        ! Calculate underline position (below character baseline)
-        ! Match the 2px padding used for characters
-        x = real((col - 1) * this%font_mgr%cell_advance + 2, GLfloat)
-        y = real(row * this%font_mgr%line_height - 2, GLfloat)  ! 2 pixels from bottom of cell
-        w = real(this%font_mgr%cell_advance - 4, GLfloat)  ! Reduce width to account for padding
+        ! Calculate underline position (below text baseline)
+        ! Underline should match the text horizontal positioning
+        ! Use consistent padding to align with text
+        x = real((col - 1) * this%font_mgr%cell_advance + 4, GLfloat)  ! Match text padding
+        ! Place underline below text, near bottom of cell
+        y = real(row * this%font_mgr%line_height - 2, GLfloat)  ! Near bottom of cell
+        w = real(this%font_mgr%cell_advance - 8, GLfloat)  ! Reduce width for padding on both sides
         h = 1.0_GLfloat  ! 1 pixel thick line
 
         ! Use white texture and color it with the text color
@@ -452,11 +456,73 @@ contains
         call glBindVertexArray(0)
     end subroutine draw_underline
 
+    ! Draw a continuous underline spanning multiple cells
+    subroutine draw_continuous_underline(this, row, start_col, end_col, fg_color, attributes)
+        class(renderer_t), intent(inout) :: this
+        integer, intent(in) :: row, start_col, end_col, fg_color, attributes
+        real(GLfloat) :: x, y, w, h, r, g, b
+        real(GLfloat), target :: vertices(16)  ! 4 vertices * (2 pos + 2 tex)
+        integer :: actual_color
+
+        ! Apply bold effect to underline color too
+        actual_color = fg_color
+
+        ! Handle COLOR_DEFAULT (256) - treat as white (7)
+        if (actual_color == COLOR_DEFAULT) then
+            actual_color = 7  ! Default to white
+        end if
+
+        if (iand(attributes, ATTR_BOLD) /= 0) then
+            if (actual_color >= 0 .and. actual_color <= 7) then
+                actual_color = actual_color + 8
+            end if
+        end if
+
+        ! Convert color to RGB
+        call get_ansi_color(actual_color, r, g, b)
+
+        ! Calculate underline position for a continuous line
+        ! Start at the beginning of start_col, end at the end of end_col
+        x = real((start_col - 1) * this%font_mgr%cell_advance, GLfloat)  ! No padding for continuous line
+
+        ! Use proper font metrics for underline positioning (like Alacritty/Kitty)
+        ! Position underline relative to baseline using font's underline metrics
+        ! For terminal rendering, we position from top of cell, not baseline
+        ! Underline should be near bottom of cell to avoid intersecting text
+        y = real(row * this%font_mgr%line_height - 1, GLfloat)  ! 1 pixel from bottom of cell
+
+        w = real((end_col - start_col + 1) * this%font_mgr%cell_advance, GLfloat)  ! Full width for all cells
+        h = real(this%font_mgr%underline_thickness, GLfloat)  ! Use font's underline thickness
+
+        ! Use white texture and color it with the text color
+        call glBindTexture(GL_TEXTURE_2D, this%white_texture)
+        call glUniform3f(this%text_color_loc, r, g, b)
+
+        ! Set up vertices for a thin horizontal quad (underline)
+        vertices = [ &
+            x,     y,     0.0_GLfloat, 0.0_GLfloat, &  ! Bottom-left
+            x + w, y,     1.0_GLfloat, 0.0_GLfloat, &  ! Bottom-right
+            x,     y + h, 0.0_GLfloat, 1.0_GLfloat, &  ! Top-left
+            x + w, y + h, 1.0_GLfloat, 1.0_GLfloat  &  ! Top-right
+        ]
+
+        ! Draw as a quad
+        call glBindVertexArray(this%vao)
+        call glBindBuffer(GL_ARRAY_BUFFER, this%vbo)
+        call glBufferData(GL_ARRAY_BUFFER, &
+                         int(16 * 4, c_size_t), &  ! 16 floats * 4 bytes
+                         c_loc(vertices), GL_DYNAMIC_DRAW)
+        call glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
+        call glBindVertexArray(0)
+    end subroutine draw_continuous_underline
+
     ! Draw terminal grid
     subroutine renderer_draw_grid(this, grid)
         class(renderer_t), intent(inout) :: this
         type(grid_t), intent(in) :: grid
         integer :: row, col
+        integer :: start_col, end_col
+        integer :: underline_color, underline_attrs
         type(cell_t) :: cell
         real(GLfloat), target :: projection(16)
 
@@ -492,14 +558,32 @@ contains
             end do
         end do
 
-        ! Second pass: Draw all underlines (after all text is drawn)
+        ! Second pass: Draw continuous underlines (after all text is drawn)
+
         do row = 1, grid%rows
-            do col = 1, grid%cols
+            col = 1
+            do while (col <= grid%cols)
                 cell = grid%cells(col, row)
 
-                ! Draw underline for any initialized cell with underline attribute
-                if (cell%codepoint > 0 .and. iand(cell%attributes, ATTR_UNDERLINE) /= 0) then
-                    call draw_underline(this, row, col, cell%fg_color, cell%attributes)
+                ! Check if this cell starts an underlined sequence
+                if (iand(cell%attributes, ATTR_UNDERLINE) /= 0) then
+                    ! Find the end of the underlined sequence
+                    start_col = col
+                    underline_color = cell%fg_color
+                    underline_attrs = cell%attributes
+
+                    ! Continue while cells have underline attribute
+                    do while (col <= grid%cols)
+                        cell = grid%cells(col, row)
+                        if (iand(cell%attributes, ATTR_UNDERLINE) == 0) exit
+                        end_col = col
+                        col = col + 1
+                    end do
+
+                    ! Draw a single continuous underline for the whole sequence
+                    call draw_continuous_underline(this, row, start_col, end_col, underline_color, underline_attrs)
+                else
+                    col = col + 1
                 end if
             end do
         end do
@@ -522,21 +606,15 @@ contains
 
         ! Calculate cursor position (underline style)
         ! Use font metrics for consistent positioning
-        ! Match the padding used for characters
-        x = real((col - 1) * this%font_mgr%cell_advance + 2, GLfloat)
+        x = real((col - 1) * this%font_mgr%cell_advance, GLfloat)
 
-        ! Always position cursor 3 pixels from bottom of cell
-        ! Check if cursor would be outside visible area
-        y = real(row * this%font_mgr%line_height - 3, GLfloat)
+        ! Position cursor at bottom of cell, standard terminal behavior
+        ! This will be cut off on the last row but that's acceptable
+        y = real(row * this%font_mgr%line_height - 1, GLfloat)  ! 1 pixel from bottom of cell (same as underline)
+        h = 2.0  ! 2 pixel thick cursor
 
-        ! If cursor is at or beyond bottom edge, move it up
-        if (y + 3.0 >= this%window_height) then
-            ! Position cursor higher up within the cell
-            y = real(row * this%font_mgr%line_height - 8, GLfloat)
-        end if
-
-        w = real(this%font_mgr%cell_advance - 4, GLfloat)  ! Account for padding on both sides
-        h = 3.0  ! 3-pixel thick underline for better visibility
+        w = real(this%font_mgr%cell_advance, GLfloat)  ! Full cell width for cursor
+        ! h is already set above based on position
 
         ! Set cursor color (bright green)
         call glUniform3f(this%text_color_loc, 0.0, 1.0, 0.0)
