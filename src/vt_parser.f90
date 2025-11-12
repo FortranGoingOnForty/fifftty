@@ -471,7 +471,8 @@ contains
             return
         end if
 
-        do i = 1, parser%num_params
+        i = 1
+        do while (i <= parser%num_params)
             param = parser%params(i)
 
             if (param == 0) then
@@ -498,9 +499,42 @@ contains
             else if (param >= 30 .and. param <= 37) then
                 ! Foreground colors (30-37)
                 parser%current_fg = param - 30
+            else if (param == 38) then
+                ! Extended foreground color
+                if (i + 1 <= parser%num_params) then
+                    if (parser%params(i + 1) == 5 .and. i + 2 <= parser%num_params) then
+                        ! 256-color: ESC[38;5;{n}m
+                        parser%current_fg = parser%params(i + 2)
+                        i = i + 2  ! Skip next two parameters
+                    else if (parser%params(i + 1) == 2 .and. i + 4 <= parser%num_params) then
+                        ! 24-bit color: ESC[38;2;{r};{g};{b}m
+                        ! For now, approximate to nearest 256-color
+                        ! TODO: Add true 24-bit color support
+                        i = i + 4  ! Skip next four parameters
+                    end if
+                end if
+            else if (param == 39) then
+                ! Reset foreground to default
+                parser%current_fg = COLOR_DEFAULT
             else if (param >= 40 .and. param <= 47) then
                 ! Background colors (40-47)
                 parser%current_bg = param - 40
+            else if (param == 48) then
+                ! Extended background color
+                if (i + 1 <= parser%num_params) then
+                    if (parser%params(i + 1) == 5 .and. i + 2 <= parser%num_params) then
+                        ! 256-color: ESC[48;5;{n}m
+                        parser%current_bg = parser%params(i + 2)
+                        i = i + 2  ! Skip next two parameters
+                    else if (parser%params(i + 1) == 2 .and. i + 4 <= parser%num_params) then
+                        ! 24-bit color: ESC[48;2;{r};{g};{b}m
+                        ! TODO: Add true 24-bit color support
+                        i = i + 4  ! Skip next four parameters
+                    end if
+                end if
+            else if (param == 49) then
+                ! Reset background to default
+                parser%current_bg = COLOR_DEFAULT
             else if (param >= 90 .and. param <= 97) then
                 ! Bright foreground colors (90-97)
                 parser%current_fg = param - 90 + 8
@@ -508,6 +542,8 @@ contains
                 ! Bright background colors (100-107)
                 parser%current_bg = param - 100 + 8
             end if
+
+            i = i + 1
         end do
     end subroutine handle_sgr
 

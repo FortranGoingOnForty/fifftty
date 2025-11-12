@@ -82,17 +82,39 @@ contains
     subroutine get_ansi_color(color_index, r, g, b)
         integer, intent(in) :: color_index
         real(GLfloat), intent(out) :: r, g, b
+        integer :: idx, ir, ig, ib
 
-        ! Default to white if COLOR_DEFAULT or out of range
-        if (color_index == COLOR_DEFAULT .or. color_index < 0 .or. color_index > 15) then
+        ! Default to white if COLOR_DEFAULT
+        if (color_index == COLOR_DEFAULT .or. color_index < 0) then
             r = 1.0
             g = 1.0
             b = 1.0
-        else
-            ! ANSI colors are 0-15, but array is 1-16
+        else if (color_index <= 15) then
+            ! Standard 16 ANSI colors
             r = COLOR_PALETTE(1, color_index + 1)
             g = COLOR_PALETTE(2, color_index + 1)
             b = COLOR_PALETTE(3, color_index + 1)
+        else if (color_index >= 16 .and. color_index <= 231) then
+            ! 6x6x6 RGB cube (216 colors)
+            idx = color_index - 16
+            ir = idx / 36
+            ig = mod(idx / 6, 6)
+            ib = mod(idx, 6)
+            ! Convert 0-5 to RGB values: 0->0, 1->95, 2->135, 3->175, 4->215, 5->255
+            r = real(merge(ir * 40 + 55, 0, ir > 0)) / 255.0
+            g = real(merge(ig * 40 + 55, 0, ig > 0)) / 255.0
+            b = real(merge(ib * 40 + 55, 0, ib > 0)) / 255.0
+        else if (color_index >= 232 .and. color_index <= 255) then
+            ! Grayscale ramp (24 shades)
+            idx = 8 + (color_index - 232) * 10
+            r = real(idx) / 255.0
+            g = real(idx) / 255.0
+            b = real(idx) / 255.0
+        else
+            ! Default to white for invalid colors (>255)
+            r = 1.0
+            g = 1.0
+            b = 1.0
         end if
     end subroutine get_ansi_color
 
@@ -322,11 +344,6 @@ contains
         if (iand(attributes, ATTR_BOLD) /= 0) then
             if (actual_color >= 0 .and. actual_color <= 7) then
                 actual_color = actual_color + 8  ! Use bright variant
-                ! Debug output
-                if (codepoint >= 65 .and. codepoint <= 90) then  ! A-Z for testing
-                    print '(A,A,A,I0,A,I0,A,I0)', "DEBUG: Bold char '", char(codepoint), "' color: ", &
-                          fg_color, " -> ", actual_color, " attrs=", attributes
-                end if
             end if
         end if
 
