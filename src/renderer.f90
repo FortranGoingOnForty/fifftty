@@ -339,6 +339,14 @@ contains
         ! Get glyph from font manager
         glyph = this%font_mgr%get_glyph(codepoint)
 
+        if (.not. glyph%loaded) then
+            ! Debug: Print which glyphs are not loading
+            if (codepoint >= 65 .and. codepoint <= 122) then  ! A-Z, a-z
+                print '(A,A,A,I0,A)', "WARNING: Glyph not loaded for '", char(codepoint), "' (", codepoint, ")"
+            end if
+            return
+        end if
+
         ! Apply bold effect by brightening color (colors 0-7 become 8-15)
         actual_color = fg_color
         if (iand(attributes, ATTR_BOLD) /= 0) then
@@ -350,8 +358,6 @@ contains
         ! Convert ANSI color index to RGB
         call get_ansi_color(actual_color, r, g, b)
         call glUniform3f(this%text_color_loc, r, g, b)
-
-        if (.not. glyph%loaded) return
 
         ! Calculate screen position (top-left corner)
         x = real((col - 1) * this%cell_width, GLfloat) + real(glyph%bearing_x, GLfloat)
@@ -453,24 +459,27 @@ contains
         call glActiveTexture(GL_TEXTURE0)
         call glBindTexture(GL_TEXTURE_2D, this%font_mgr%atlas_texture)
 
-        ! Draw each character in the grid
+        ! First pass: Draw all characters
+        call glBindTexture(GL_TEXTURE_2D, this%font_mgr%atlas_texture)
         do row = 1, grid%rows
             do col = 1, grid%cols
                 cell = grid%cells(col, row)  ! cells(col, row) not cells(row, col)
 
-                ! Skip completely empty cells (codepoint 0)
-                if (cell%codepoint > 0) then
-                    ! Draw visible characters (not spaces)
-                    if (cell%codepoint /= 32) then
-                        ! Ensure font texture is bound for character rendering
-                        call glBindTexture(GL_TEXTURE_2D, this%font_mgr%atlas_texture)
-                        call draw_character(this, cell%codepoint, row, col, cell%fg_color, cell%attributes)
-                    end if
+                ! Skip empty cells and spaces
+                if (cell%codepoint > 0 .and. cell%codepoint /= 32) then
+                    call draw_character(this, cell%codepoint, row, col, cell%fg_color, cell%attributes)
+                end if
+            end do
+        end do
 
-                    ! Draw underline for any initialized cell with underline attribute (including spaces)
-                    if (iand(cell%attributes, ATTR_UNDERLINE) /= 0) then
-                        call draw_underline(this, row, col, cell%fg_color, cell%attributes)
-                    end if
+        ! Second pass: Draw all underlines (after all text is drawn)
+        do row = 1, grid%rows
+            do col = 1, grid%cols
+                cell = grid%cells(col, row)
+
+                ! Draw underline for any initialized cell with underline attribute
+                if (cell%codepoint > 0 .and. iand(cell%attributes, ATTR_UNDERLINE) /= 0) then
+                    call draw_underline(this, row, col, cell%fg_color, cell%attributes)
                 end if
             end do
         end do

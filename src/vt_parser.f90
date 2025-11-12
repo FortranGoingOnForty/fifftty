@@ -6,7 +6,7 @@ module vt_parser
     private
 
     ! Debug flag for escape sequence logging
-    logical, parameter :: DEBUG_SEQUENCES = .true.
+    logical, parameter :: DEBUG_SEQUENCES = .false.
 
     ! Parser states (VT100/ANSI state machine)
     integer, parameter, public :: STATE_GROUND = 0
