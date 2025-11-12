@@ -297,14 +297,18 @@ contains
 
         ! Make this the controlling terminal for the session
         ! This is critical for zsh to recognize it as an interactive terminal
-        ! On macOS, TIOCSCTTY might need a non-zero force parameter
-        if (ioctl(slave_fd, TIOCSCTTY, transfer(1_c_int, c_null_ptr)) < 0) then
-            ! Try again without force flag
-            if (ioctl(slave_fd, TIOCSCTTY, c_null_ptr) < 0) then
-                ! Some systems don't require this, but log the error
-                ! Note: Must print before dup2 redirects stdout!
-                write(2, '(A)') "Warning: Failed to set controlling terminal (TIOCSCTTY)"
-            end if
+        ! Try different approaches for compatibility
+
+        ! Method 1: Try with force flag (1) - works on some systems
+        if (ioctl(slave_fd, TIOCSCTTY, transfer(1_c_int, c_null_ptr)) == 0) then
+            write(2, '(A)') "DEBUG: Set controlling terminal with force flag"
+        ! Method 2: Try without any flag - standard approach
+        else if (ioctl(slave_fd, TIOCSCTTY, c_null_ptr) == 0) then
+            write(2, '(A)') "DEBUG: Set controlling terminal without flag"
+        ! Method 3: Some systems automatically make it controlling on first open
+        else
+            ! Log the warning but continue - some systems don't need explicit TIOCSCTTY
+            write(2, '(A)') "Warning: TIOCSCTTY failed - shells may not recognize terminal as interactive"
         end if
 
         ! Redirect stdin, stdout, stderr to slave PTY
