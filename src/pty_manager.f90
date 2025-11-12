@@ -17,6 +17,8 @@ module pty_manager
     integer(c_long), parameter :: TIOCSWINSZ = int(z'5414', c_long)
     ! ioctl constant for non-blocking I/O (BSD/macOS)
     integer(c_long), parameter :: FIONBIO = int(z'8004667e', c_long)
+    ! ioctl constant to set controlling terminal (BSD/macOS)
+    integer(c_long), parameter :: TIOCSCTTY = int(z'540E', c_long)
 
     ! Window size structure (struct winsize)
     type, bind(c) :: winsize_t
@@ -293,6 +295,13 @@ contains
             stop 1
         end if
 
+        ! Make this the controlling terminal for the session
+        ! This is critical for zsh to recognize it as an interactive terminal
+        if (ioctl(slave_fd, TIOCSCTTY, c_null_ptr) < 0) then
+            print *, "Warning: Failed to set controlling terminal (TIOCSCTTY)"
+            ! Continue anyway, some systems don't require this
+        end if
+
         ! Redirect stdin, stdout, stderr to slave PTY
         if (dup2(slave_fd, STDIN_FILENO) < 0) stop 1
         if (dup2(slave_fd, STDOUT_FILENO) < 0) stop 1
@@ -327,13 +336,20 @@ contains
         ! Set TERM environment variable so shell knows terminal capabilities
         if (setenv("TERM" // c_null_char, "xterm-256color" // c_null_char, 1) /= 0) then
             print *, "ERROR: Failed to set TERM environment variable"
+        else
+            print *, "DEBUG: Set TERM=xterm-256color for child shell"
         end if
 
-        ! Disable zsh PROMPT_SP to avoid the "%" marker for now
-        ! TODO: Remove this once we properly handle cursor position queries
-        if (setenv("PROMPT_SP" // c_null_char, "" // c_null_char, 1) /= 0) then
-            print *, "Warning: Failed to set PROMPT_SP"
+        ! Set COLUMNS and LINES to help shell understand terminal size
+        if (setenv("COLUMNS" // c_null_char, "80" // c_null_char, 1) /= 0) then
+            print *, "Warning: Failed to set COLUMNS"
         end if
+        if (setenv("LINES" // c_null_char, "24" // c_null_char, 1) /= 0) then
+            print *, "Warning: Failed to set LINES"
+        end if
+
+        ! Allow zsh PROMPT_SP to function normally - we now handle cursor queries properly
+        ! PROMPT_SP shows "%" when cursor position is unknown, which prompts terminals to respond
 
         ! Execute shell with -i flag (interactive)
         dash_i = "-i" // c_null_char

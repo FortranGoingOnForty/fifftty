@@ -97,6 +97,14 @@ contains
 
         do i = 1, length
             byte = ichar(buffer(i:i))
+            ! Ultra-verbose debugging: log EVERY byte
+            if (DEBUG_SEQUENCES .and. byte == 27) then
+                print '(A)', "DEBUG: === ESC sequence starting ==="
+            else if (DEBUG_SEQUENCES .and. byte == ichar('n') .and. i > 1) then
+                if (ichar(buffer(i-1:i-1)) == ichar('6')) then
+                    print '(A)', "CRITICAL: Detected '6n' sequence - possible CSI 6 n!"
+                end if
+            end if
             call this%process_byte(grid, byte)
         end do
     end subroutine parser_process_buffer
@@ -120,8 +128,22 @@ contains
             if (grid%cursor_col > grid%cols) call handle_newline(grid)
         else if (byte >= 32 .and. byte <= 126) then  ! Printable ASCII
             call write_char(parser, grid, byte)
+        else if (byte == 7) then  ! BEL (bell)
+            if (DEBUG_SEQUENCES) print '(A)', "DEBUG: BEL (bell) received"
+        else if (byte == 14) then  ! SO (shift out)
+            if (DEBUG_SEQUENCES) print '(A)', "DEBUG: SO (shift out) - charset switching"
+        else if (byte == 15) then  ! SI (shift in)
+            if (DEBUG_SEQUENCES) print '(A)', "DEBUG: SI (shift in) - charset switching"
         else if (byte > 0 .and. byte < 32) then  ! Other control characters
-            print '(A,I0,A,Z2.2)', "DEBUG: Ignored control char: ", byte, " (0x", byte, ")"
+            if (DEBUG_SEQUENCES) then
+                print '(A,I0,A,Z2.2)', "DEBUG: Ignored control char: ", byte, " (0x", byte, ")"
+            end if
+        else if (byte > 126) then  ! Extended ASCII/UTF-8
+            if (DEBUG_SEQUENCES) then
+                print '(A,I0,A,Z2.2)', "DEBUG: Extended char: ", byte, " (0x", byte, ")"
+            end if
+            ! For now, just write it as-is (will show as '?' likely)
+            call write_char(parser, grid, byte)
         end if
     end subroutine handle_ground
 

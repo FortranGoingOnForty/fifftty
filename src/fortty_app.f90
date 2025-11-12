@@ -59,6 +59,10 @@ contains
 
         initialized = .true.
 
+        ! Debug: Print initial state
+        print '(A,I0,A,I0)', "DEBUG: Terminal initialized with cursor at ", &
+              global_grid%cursor_row, ",", global_grid%cursor_col
+
         ! Start PTY polling
         call start_pty_polling()
     end subroutine gl_realize_callback
