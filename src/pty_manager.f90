@@ -14,7 +14,9 @@ module pty_manager
     integer(c_int), parameter :: STDERR_FILENO = 2
 
     ! ioctl constants for terminal window size
-    integer(c_long), parameter :: TIOCSWINSZ = int(z'5414', c_long)
+    ! macOS uses 0x80087467, Linux uses 0x5414
+    ! We'll use macOS value since that's what we're running on
+    integer(c_long), parameter :: TIOCSWINSZ = int(z'80087467', c_long)
     ! ioctl constant for non-blocking I/O (BSD/macOS)
     integer(c_long), parameter :: FIONBIO = int(z'8004667e', c_long)
     ! ioctl constant to set controlling terminal (BSD/macOS)
