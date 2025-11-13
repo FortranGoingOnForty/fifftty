@@ -151,6 +151,12 @@ module pty_manager
             integer(c_int) :: setenv
         end function setenv
 
+        function unsetenv(name) bind(c, name='unsetenv')
+            import :: c_char, c_int
+            character(kind=c_char), dimension(*) :: name
+            integer(c_int) :: unsetenv
+        end function unsetenv
+
         subroutine perror(s) bind(c, name='perror')
             import :: c_char
             character(kind=c_char), dimension(*) :: s
@@ -372,8 +378,9 @@ contains
 
         ! Disable zsh PROMPT_SP to prevent excessive space output during initialization
         ! PROMPT_SP causes zsh to fill terminal with spaces, causing scrolling issues
-        if (setenv("PROMPT_SP" // c_null_char, "" // c_null_char, 1) /= 0) then
-            write(2, '(A)') "Warning: Failed to set PROMPT_SP"
+        ! Must unset (not just set to empty) for zsh to properly disable the feature
+        if (unsetenv("PROMPT_SP" // c_null_char) /= 0) then
+            write(2, '(A)') "Warning: Failed to unset PROMPT_SP"
         end if
 
         ! Execute shell with -i flag (interactive)
