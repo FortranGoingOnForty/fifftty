@@ -370,8 +370,11 @@ contains
             print *, "Warning: Failed to set LINES"
         end if
 
-        ! Allow zsh PROMPT_SP to function normally - we now handle cursor queries properly
-        ! PROMPT_SP shows "%" when cursor position is unknown, which prompts terminals to respond
+        ! Disable zsh PROMPT_SP to prevent excessive space output during initialization
+        ! PROMPT_SP causes zsh to fill terminal with spaces, causing scrolling issues
+        if (setenv("PROMPT_SP" // c_null_char, "" // c_null_char, 1) /= 0) then
+            write(2, '(A)') "Warning: Failed to set PROMPT_SP"
+        end if
 
         ! Execute shell with -i flag (interactive)
         dash_i = "-i" // c_null_char
