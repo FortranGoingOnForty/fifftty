@@ -243,14 +243,8 @@ contains
         end if
         call c_f_string(slave_name_ptr, slave_name)
 
-        ! Set window size
-        ws%ws_row = int(rows, c_short)
-        ws%ws_col = int(cols, c_short)
-        ws%ws_xpixel = 0
-        ws%ws_ypixel = 0
-        if (ioctl(master_fd, TIOCSWINSZ, c_loc(ws)) /= 0) then
-            call perror("ioctl TIOCSWINSZ" // c_null_char)
-        end if
+        ! Note: Window size is set in child process on slave PTY (see child_setup)
+        ! Setting it on master PTY before fork causes "Inappropriate ioctl" error
 
         ! Fork child process
         pid = c_fork()
@@ -261,7 +255,7 @@ contains
             return
         else if (pid == 0) then
             ! Child process
-            call child_setup(slave_name, shell_path)
+            call child_setup(slave_name, rows, cols, shell_path)
             ! If we get here, exec failed
             stop 1
         else
@@ -274,8 +268,9 @@ contains
     end function pty_open
 
     ! Child process setup (runs in child, does not return)
-    subroutine child_setup(slave_name, shell_path)
+    subroutine child_setup(slave_name, rows, cols, shell_path)
         character(len=*), intent(in) :: slave_name
+        integer, intent(in) :: rows, cols
         character(len=*), intent(in), optional :: shell_path
         integer(c_int) :: slave_fd
         character(len=256) :: shell
@@ -283,6 +278,8 @@ contains
         type(c_ptr), target :: argv(3)
         character(len=3, kind=c_char), target :: dash_i
         integer :: i, slen
+        type(winsize_t), target :: ws
+        character(len=16) :: rows_str, cols_str
 
         ! Create new session
         if (setsid() < 0) then
@@ -295,6 +292,18 @@ contains
         if (slave_fd < 0) then
             call perror("open slave" // c_null_char)
             stop 1
+        end if
+
+        ! Set window size on slave (important for macOS)
+        ws%ws_row = int(rows, c_short)
+        ws%ws_col = int(cols, c_short)
+        ws%ws_xpixel = 0
+        ws%ws_ypixel = 0
+
+        if (ioctl(slave_fd, TIOCSWINSZ, c_loc(ws)) /= 0) then
+            write(2, '(A)') "Warning: TIOCSWINSZ on slave failed (child)"
+        else
+            write(2, '(A)') "DEBUG: Window size set on slave_fd successfully"
         end if
 
         ! Make this the controlling terminal for the session
@@ -352,10 +361,12 @@ contains
         end if
 
         ! Set COLUMNS and LINES to help shell understand terminal size
-        if (setenv("COLUMNS" // c_null_char, "80" // c_null_char, 1) /= 0) then
+        write(cols_str, '(I0)') cols
+        write(rows_str, '(I0)') rows
+        if (setenv("COLUMNS" // c_null_char, trim(cols_str) // c_null_char, 1) /= 0) then
             print *, "Warning: Failed to set COLUMNS"
         end if
-        if (setenv("LINES" // c_null_char, "24" // c_null_char, 1) /= 0) then
+        if (setenv("LINES" // c_null_char, trim(rows_str) // c_null_char, 1) /= 0) then
             print *, "Warning: Failed to set LINES"
         end if
 
@@ -456,6 +467,8 @@ contains
 
         integer(c_size_t) :: write_result
         character(len=1, kind=c_char), target :: c_buffer(buffer_size)
+        integer :: i
+        character(len=256) :: debug_str
 
         if (.not. this%is_open) then
             bytes_written = -1
@@ -465,6 +478,15 @@ contains
         c_buffer = transfer(buffer(1:buffer_size), c_buffer)
         write_result = c_write(this%master_fd, c_loc(c_buffer), int(buffer_size, c_size_t))
         bytes_written = int(write_result)
+
+        ! Debug log CPR responses
+        if (buffer_size > 2 .and. ichar(buffer(1:1)) == 27 .and. buffer(2:2) == '[') then
+            if (index(buffer(1:buffer_size), 'R') > 0) then
+                write(debug_str, '(A)') buffer(1:buffer_size)
+                write(2, '(A,A,A,I0)') "DEBUG PTY_WRITE: Sending CPR response '", &
+                    trim(debug_str), "' (", bytes_written, " bytes)"
+            end if
+        end if
     end function pty_write
 
     ! Resize PTY
