@@ -45,6 +45,10 @@ contains
         grid_cols = 800 / global_renderer%cell_width
         grid_rows = 600 / global_renderer%cell_height
 
+        print '(A,I0,A,I0,A,I0,A,I0)', "DEBUG: Window 800x600, cells ", &
+            global_renderer%cell_width, "x", global_renderer%cell_height, &
+            " -> grid ", grid_cols, "x", grid_rows
+
         ! Initialize terminal grid with calculated dimensions
         call global_grid%init(grid_rows, grid_cols)
 
