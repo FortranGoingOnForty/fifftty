@@ -96,6 +96,7 @@ module terminal_grid
         procedure :: set_selection_end => grid_set_selection_end
         procedure :: clear_selection => grid_clear_selection
         procedure :: is_cell_selected => grid_is_cell_selected
+        procedure :: get_selected_text => grid_get_selected_text
     end type grid_t
 
 contains
@@ -599,5 +600,93 @@ contains
 
         selected = (cell_pos >= start_pos .and. cell_pos <= end_pos)
     end function grid_is_cell_selected
+
+    ! Get selected text as a string
+    subroutine grid_get_selected_text(this, text, text_len)
+        class(grid_t), intent(in) :: this
+        character(len=*), intent(out) :: text
+        integer, intent(out) :: text_len
+        integer :: row, col, start_row, start_col, end_row, end_col
+        integer :: codepoint, pos
+        type(cell_t) :: cell
+
+        text = ""
+        text_len = 0
+        pos = 1
+
+        if (.not. this%selection_active) return
+
+        ! Normalize selection (start <= end)
+        if (this%selection_start_row < this%selection_end_row .or. &
+            (this%selection_start_row == this%selection_end_row .and. &
+             this%selection_start_col <= this%selection_end_col)) then
+            start_row = this%selection_start_row
+            start_col = this%selection_start_col
+            end_row = this%selection_end_row
+            end_col = this%selection_end_col
+        else
+            start_row = this%selection_end_row
+            start_col = this%selection_end_col
+            end_row = this%selection_start_row
+            end_col = this%selection_start_col
+        end if
+
+        ! Iterate through selected cells
+        do row = start_row, end_row
+            if (row == start_row .and. row == end_row) then
+                ! Single row selection
+                do col = start_col, end_col
+                    cell = this%get_cell(row, col)
+                    codepoint = cell%codepoint
+                    if (codepoint > 0 .and. codepoint < 128 .and. pos <= len(text)) then
+                        text(pos:pos) = char(codepoint)
+                        pos = pos + 1
+                    end if
+                end do
+            else if (row == start_row) then
+                ! First row: from start_col to end of row
+                do col = start_col, this%cols
+                    cell = this%get_cell(row, col)
+                    codepoint = cell%codepoint
+                    if (codepoint > 0 .and. codepoint < 128 .and. pos <= len(text)) then
+                        text(pos:pos) = char(codepoint)
+                        pos = pos + 1
+                    end if
+                end do
+                ! Add newline
+                if (pos <= len(text)) then
+                    text(pos:pos) = char(10)  ! LF
+                    pos = pos + 1
+                end if
+            else if (row == end_row) then
+                ! Last row: from start to end_col
+                do col = 1, end_col
+                    cell = this%get_cell(row, col)
+                    codepoint = cell%codepoint
+                    if (codepoint > 0 .and. codepoint < 128 .and. pos <= len(text)) then
+                        text(pos:pos) = char(codepoint)
+                        pos = pos + 1
+                    end if
+                end do
+            else
+                ! Middle rows: full row
+                do col = 1, this%cols
+                    cell = this%get_cell(row, col)
+                    codepoint = cell%codepoint
+                    if (codepoint > 0 .and. codepoint < 128 .and. pos <= len(text)) then
+                        text(pos:pos) = char(codepoint)
+                        pos = pos + 1
+                    end if
+                end do
+                ! Add newline
+                if (pos <= len(text)) then
+                    text(pos:pos) = char(10)  ! LF
+                    pos = pos + 1
+                end if
+            end if
+        end do
+
+        text_len = pos - 1
+    end subroutine grid_get_selected_text
 
 end module terminal_grid

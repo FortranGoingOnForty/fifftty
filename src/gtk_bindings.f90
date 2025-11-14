@@ -251,6 +251,19 @@ module gtk_bindings
             type(c_ptr), value :: widget
             type(c_ptr) :: gtk_widget_get_display
         end function gtk_widget_get_display
+
+        ! Clipboard operations
+        function gdk_display_get_clipboard(display) bind(c, name="gdk_display_get_clipboard")
+            import :: c_ptr
+            type(c_ptr), value :: display
+            type(c_ptr) :: gdk_display_get_clipboard
+        end function gdk_display_get_clipboard
+
+        subroutine gdk_clipboard_set_text(clipboard, text) bind(c, name="gdk_clipboard_set_text")
+            import :: c_ptr, c_char
+            type(c_ptr), value :: clipboard
+            character(kind=c_char), dimension(*) :: text
+        end subroutine gdk_clipboard_set_text
     end interface
 
 contains

@@ -342,6 +342,15 @@ contains
             end if
         end if
 
+        ! Check for Ctrl+Shift+C (copy selection to clipboard)
+        if (iand(state, GDK_CONTROL_MASK) /= 0 .and. iand(state, GDK_SHIFT_MASK) /= 0) then
+            if (keyval == ichar('C') .or. keyval == ichar('c')) then
+                call copy_selection_to_clipboard()
+                handled = 1
+                return
+            end if
+        end if
+
         ! Check for Ctrl+letter combinations (Ctrl+A through Ctrl+Z)
         ! GTK sends lowercase letters with Ctrl modifier
         if (iand(state, GDK_CONTROL_MASK) /= 0) then
@@ -635,5 +644,34 @@ contains
         ! Send to PTY
         bytes_written = global_pty%write(mouse_seq, seq_len)
     end subroutine mouse_motion_callback
+
+    ! Copy selected text to clipboard
+    subroutine copy_selection_to_clipboard()
+        character(len=8192) :: selected_text
+        integer :: text_len
+        type(c_ptr) :: display, clipboard
+
+        if (.not. initialized) return
+        if (.not. global_grid%selection_active) return
+
+        ! Get selected text from grid
+        call global_grid%get_selected_text(selected_text, text_len)
+
+        if (text_len <= 0) return
+
+        ! Get display and clipboard
+        display = gtk_widget_get_display(global_gl_area)
+        if (.not. c_associated(display)) return
+
+        clipboard = gdk_display_get_clipboard(display)
+        if (.not. c_associated(clipboard)) return
+
+        ! Copy text to clipboard
+        call gdk_clipboard_set_text(clipboard, trim(selected_text(1:text_len)) // c_null_char)
+
+        ! Clear selection after copy (standard terminal behavior)
+        call global_grid%clear_selection()
+        call gtk_gl_area_queue_render(global_gl_area)
+    end subroutine copy_selection_to_clipboard
 
 end module fortty_app
