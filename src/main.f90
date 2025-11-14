@@ -107,8 +107,20 @@ contains
         ! Realize signal - called when GL context is created
         handler_id = g_signal_connect(gl_area, "realize", c_funloc(gl_realize_callback), c_null_ptr)
 
+        ! Map signal - called when widget is placed on screen (after WM positioning)
+        ! This fires AFTER tiling WMs move windows, ensuring correct scale factor
+        handler_id = g_signal_connect(gl_area, "map", c_funloc(gl_map_callback), c_null_ptr)
+
         ! Render signal - called when widget needs redrawing
         handler_id = g_signal_connect(gl_area, "render", c_funloc(gl_render_callback), c_null_ptr)
+
+        ! Resize signal - called when widget size changes
+        handler_id = g_signal_connect(gl_area, "resize", c_funloc(gl_resize_callback), c_null_ptr)
+
+        ! Scale factor signal - called when widget moves between monitors with different DPI
+        ! This is the proper GTK way to handle DPI changes (used by VTE/GNOME Terminal)
+        handler_id = g_signal_connect(gl_area, "notify::scale-factor", &
+                                      c_funloc(scale_factor_changed_callback), c_null_ptr)
     end subroutine connect_gl_signals
 
     ! Connect keyboard signals

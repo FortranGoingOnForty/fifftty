@@ -48,6 +48,7 @@ module terminal_grid
         integer :: cursor_row     ! Cursor position (1-indexed)
         integer :: cursor_col     ! Cursor position (1-indexed)
         logical :: cursor_visible ! Cursor visibility
+        logical :: pending_wrap   ! True if cursor is at rightmost column and next char will wrap
         type(cell_t), allocatable :: cells(:,:)  ! Grid buffer (col, row)
     contains
         procedure :: init => grid_init
@@ -73,6 +74,7 @@ contains
         this%cursor_row = 1
         this%cursor_col = 1
         this%cursor_visible = .true.
+        this%pending_wrap = .false.
 
         allocate(this%cells(cols, rows))
         call this%clear()
@@ -101,6 +103,7 @@ contains
         ! Reset cursor to home position
         this%cursor_row = 1
         this%cursor_col = 1
+        this%pending_wrap = .false.
     end subroutine grid_clear
 
     ! Clear a single line
@@ -172,6 +175,11 @@ contains
         integer, intent(in) :: new_rows, new_cols
         type(cell_t), allocatable :: old_cells(:,:)
         integer :: copy_rows, copy_cols, i, j
+        integer :: old_rows, old_cols
+
+        ! Save old dimensions
+        old_rows = this%rows
+        old_cols = this%cols
 
         ! Save old cells
         allocate(old_cells(this%cols, this%rows))
@@ -181,12 +189,16 @@ contains
         deallocate(this%cells)
         allocate(this%cells(new_cols, new_rows))
 
-        ! Determine how much to copy
-        copy_rows = min(this%rows, new_rows)
-        copy_cols = min(this%cols, new_cols)
+        ! Update dimensions BEFORE clearing (grid_clear uses this%rows/cols!)
+        this%rows = new_rows
+        this%cols = new_cols
 
         ! Clear new grid first
         call this%clear()
+
+        ! Determine how much to copy (using saved old dimensions)
+        copy_rows = min(old_rows, new_rows)
+        copy_cols = min(old_cols, new_cols)
 
         ! Copy old content
         do j = 1, copy_rows
@@ -194,10 +206,6 @@ contains
                 this%cells(i, j) = old_cells(i, j)
             end do
         end do
-
-        ! Update dimensions
-        this%rows = new_rows
-        this%cols = new_cols
 
         ! Clamp cursor to new bounds
         if (this%cursor_row > new_rows) this%cursor_row = new_rows
@@ -213,6 +221,7 @@ contains
 
         this%cursor_row = max(1, min(row, this%rows))
         this%cursor_col = max(1, min(col, this%cols))
+        this%pending_wrap = .false.  ! Clear pending wrap on explicit cursor movement
     end subroutine grid_move_cursor
 
 end module terminal_grid

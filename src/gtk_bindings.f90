@@ -161,6 +161,86 @@ module gtk_bindings
             integer(c_int), value :: connect_flags
             integer(c_long) :: g_signal_connect_data
         end function g_signal_connect_data
+
+        ! Get allocated width of widget (accounts for DPI scaling)
+        function gtk_widget_get_allocated_width(widget) bind(c, name="gtk_widget_get_allocated_width")
+            import :: c_ptr, c_int
+            type(c_ptr), value :: widget
+            integer(c_int) :: gtk_widget_get_allocated_width
+        end function gtk_widget_get_allocated_width
+
+        ! Get allocated height of widget (accounts for DPI scaling)
+        function gtk_widget_get_allocated_height(widget) bind(c, name="gtk_widget_get_allocated_height")
+            import :: c_ptr, c_int
+            type(c_ptr), value :: widget
+            integer(c_int) :: gtk_widget_get_allocated_height
+        end function gtk_widget_get_allocated_height
+
+        ! Get scale factor of widget (1 for normal DPI, 2 for HiDPI/Retina)
+        function gtk_widget_get_scale_factor(widget) bind(c, name="gtk_widget_get_scale_factor")
+            import :: c_ptr, c_int
+            type(c_ptr), value :: widget
+            integer(c_int) :: gtk_widget_get_scale_factor
+        end function gtk_widget_get_scale_factor
+
+        ! GDK Display and Monitor functions for getting scale factor before widget realization
+        function gdk_display_get_default() bind(c, name="gdk_display_get_default")
+            import :: c_ptr
+            type(c_ptr) :: gdk_display_get_default
+        end function gdk_display_get_default
+
+        function gdk_display_get_monitors(display) bind(c, name="gdk_display_get_monitors")
+            import :: c_ptr
+            type(c_ptr), value :: display
+            type(c_ptr) :: gdk_display_get_monitors
+        end function gdk_display_get_monitors
+
+        function g_list_model_get_n_items(list) bind(c, name="g_list_model_get_n_items")
+            import :: c_ptr, c_int
+            type(c_ptr), value :: list
+            integer(c_int) :: g_list_model_get_n_items
+        end function g_list_model_get_n_items
+
+        function g_list_model_get_item(list, position) bind(c, name="g_list_model_get_item")
+            import :: c_ptr, c_int
+            type(c_ptr), value :: list
+            integer(c_int), value :: position
+            type(c_ptr) :: g_list_model_get_item
+        end function g_list_model_get_item
+
+        function gdk_monitor_get_scale_factor(monitor) bind(c, name="gdk_monitor_get_scale_factor")
+            import :: c_ptr, c_int
+            type(c_ptr), value :: monitor
+            integer(c_int) :: gdk_monitor_get_scale_factor
+        end function gdk_monitor_get_scale_factor
+
+        ! Get the native (top-level) widget containing this widget
+        function gtk_widget_get_native(widget) bind(c, name="gtk_widget_get_native")
+            import :: c_ptr
+            type(c_ptr), value :: widget
+            type(c_ptr) :: gtk_widget_get_native
+        end function gtk_widget_get_native
+
+        ! Get the surface from a native widget
+        function gtk_native_get_surface(native) bind(c, name="gtk_native_get_surface")
+            import :: c_ptr
+            type(c_ptr), value :: native
+            type(c_ptr) :: gtk_native_get_surface
+        end function gtk_native_get_surface
+
+        ! Get the monitor at a specific surface
+        function gdk_display_get_monitor_at_surface(display, surface) bind(c, name="gdk_display_get_monitor_at_surface")
+            import :: c_ptr
+            type(c_ptr), value :: display, surface
+            type(c_ptr) :: gdk_display_get_monitor_at_surface
+        end function gdk_display_get_monitor_at_surface
+
+        ! Get display from widget
+        function gtk_widget_get_display(widget) bind(c, name="gtk_widget_get_display")
+            import :: c_ptr
+            type(c_ptr), value :: widget
+            type(c_ptr) :: gtk_widget_get_display
+        end function gtk_widget_get_display
     end interface
 
 contains

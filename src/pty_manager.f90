@@ -12,6 +12,9 @@ module pty_manager
     integer(c_int), parameter :: STDIN_FILENO = 0
     integer(c_int), parameter :: STDOUT_FILENO = 1
     integer(c_int), parameter :: STDERR_FILENO = 2
+    integer(c_int), parameter :: O_WRONLY = int(z'0001', c_int)
+    integer(c_int), parameter :: O_CREAT = int(z'0200', c_int)
+    integer(c_int), parameter :: O_APPEND = int(z'0008', c_int)
 
     ! ioctl constants for terminal window size
     ! macOS uses 0x80087467, Linux uses 0x5414
@@ -19,8 +22,14 @@ module pty_manager
     integer(c_long), parameter :: TIOCSWINSZ = int(z'80087467', c_long)
     ! ioctl constant for non-blocking I/O (BSD/macOS)
     integer(c_long), parameter :: FIONBIO = int(z'8004667e', c_long)
-    ! ioctl constant to set controlling terminal (BSD/macOS)
+    ! ioctl constant to set controlling terminal (platform-specific)
+#ifdef PLATFORM_MACOS
+    ! macOS/BSD: _IOW('t', 97, int) = 0x20007461
+    integer(c_long), parameter :: TIOCSCTTY = int(z'20007461', c_long)
+#else
+    ! Linux: 0x540E
     integer(c_long), parameter :: TIOCSCTTY = int(z'540E', c_long)
+#endif
 
     ! Window size structure (struct winsize)
     type, bind(c) :: winsize_t
@@ -87,6 +96,14 @@ module pty_manager
             integer(c_int), value :: flags
             integer(c_int) :: c_open
         end function c_open
+
+        function c_open3(pathname, flags, mode) bind(c, name='open')
+            import :: c_int, c_char
+            character(kind=c_char), dimension(*) :: pathname
+            integer(c_int), value :: flags
+            integer(c_int), value :: mode
+            integer(c_int) :: c_open3
+        end function c_open3
 
         function dup2(oldfd, newfd) bind(c, name='dup2')
             import :: c_int
@@ -176,6 +193,18 @@ module pty_manager
             type(c_ptr), value :: termios_p
             integer(c_int) :: tcsetattr
         end function tcsetattr
+
+#ifdef PLATFORM_MACOS
+        function c_errno_location() bind(c, name='__error')
+            import :: c_ptr
+            type(c_ptr) :: c_errno_location
+        end function c_errno_location
+#else
+        function c_errno_location() bind(c, name='__errno_location')
+            import :: c_ptr
+            type(c_ptr) :: c_errno_location
+        end function c_errno_location
+#endif
     end interface
 
     ! termios structure (simplified for our needs)
@@ -184,7 +213,7 @@ module pty_manager
         integer(c_int) :: c_oflag   ! Output flags
         integer(c_int) :: c_cflag   ! Control flags
         integer(c_int) :: c_lflag   ! Local flags
-        integer(c_char) :: c_cc(20) ! Control characters
+        character(c_char) :: c_cc(20) ! Control characters
     end type termios_t
 
     ! termios flags
@@ -193,6 +222,17 @@ module pty_manager
     integer(c_int), parameter :: TCSANOW = 0
 
 contains
+
+    ! Helper function to get errno value
+    function errno_val() result(errno)
+        integer(c_int) :: errno
+        type(c_ptr) :: errno_ptr
+        integer(c_int), pointer :: errno_fptr
+
+        errno_ptr = c_errno_location()
+        call c_f_pointer(errno_ptr, errno_fptr)
+        errno = errno_fptr
+    end function errno_val
 
     ! Open PTY and spawn shell
     function pty_open(this, rows, cols, shell_path) result(success)
@@ -206,7 +246,6 @@ contains
         type(c_ptr) :: slave_name_ptr
         character(len=256) :: slave_name
         character(len=256) :: shell
-        type(winsize_t), target :: ws
 
         success = .false.
 
@@ -249,8 +288,9 @@ contains
         end if
         call c_f_string(slave_name_ptr, slave_name)
 
-        ! Note: Window size is set in child process on slave PTY (see child_setup)
-        ! Setting it on master PTY before fork causes "Inappropriate ioctl" error
+        ! Note: Window size must be set on slave FD in child process
+        ! TIOCSWINSZ on master FD is NOT supported on BSD/macOS
+        ! (returns "Inappropriate ioctl for device" - this is normal)
 
         ! Fork child process
         pid = c_fork()
@@ -279,11 +319,13 @@ contains
         integer, intent(in) :: rows, cols
         character(len=*), intent(in), optional :: shell_path
         integer(c_int) :: slave_fd
+        integer(c_int) :: debug_fd
         character(len=256) :: shell
         character(len=256, kind=c_char), target :: shell_cstr
         type(c_ptr), target :: argv(3)
         character(len=3, kind=c_char), target :: dash_i
         integer :: i, slen
+        integer(c_int) :: ret
         type(winsize_t), target :: ws
         character(len=16) :: rows_str, cols_str
 
@@ -300,32 +342,34 @@ contains
             stop 1
         end if
 
-        ! Set window size on slave (important for macOS)
+        ! Open debug log file BEFORE dup2 so we can write to it even after stderr is redirected
+        debug_fd = c_open3("fort.2" // c_null_char, ior(O_WRONLY, ior(O_CREAT, O_APPEND)), int(o'0644', c_int))
+
+        ! Set up window size struct BEFORE dup2
         ws%ws_row = int(rows, c_short)
         ws%ws_col = int(cols, c_short)
         ws%ws_xpixel = 0
         ws%ws_ypixel = 0
 
-        if (ioctl(slave_fd, TIOCSWINSZ, c_loc(ws)) /= 0) then
-            write(2, '(A)') "Warning: TIOCSWINSZ on slave failed (child)"
-        else
-            write(2, '(A)') "DEBUG: Window size set on slave_fd successfully"
+        if (debug_fd >= 0) then
+            write(debug_fd, '(A,I0,A,I0,A)') "DEBUG [child]: Will set PTY window size to ", &
+                cols, " cols x ", rows, " rows"
         end if
 
-        ! Make this the controlling terminal for the session
+        ! Make this the controlling terminal for the session FIRST
         ! This is critical for zsh to recognize it as an interactive terminal
         ! Try different approaches for compatibility
 
         ! Method 1: Try with force flag (1) - works on some systems
         if (ioctl(slave_fd, TIOCSCTTY, transfer(1_c_int, c_null_ptr)) == 0) then
-            write(2, '(A)') "DEBUG: Set controlling terminal with force flag"
+            if (debug_fd >= 0) write(debug_fd, '(A)') "DEBUG: Set controlling terminal with force flag"
         ! Method 2: Try without any flag - standard approach
         else if (ioctl(slave_fd, TIOCSCTTY, c_null_ptr) == 0) then
-            write(2, '(A)') "DEBUG: Set controlling terminal without flag"
+            if (debug_fd >= 0) write(debug_fd, '(A)') "DEBUG: Set controlling terminal without flag"
         ! Method 3: Some systems automatically make it controlling on first open
         else
             ! Log the warning but continue - some systems don't need explicit TIOCSCTTY
-            write(2, '(A)') "Warning: TIOCSCTTY failed - shells may not recognize terminal as interactive"
+            if (debug_fd >= 0) write(debug_fd, '(A)') "Warning: TIOCSCTTY failed - shells may not recognize terminal as interactive"
         end if
 
         ! Redirect stdin, stdout, stderr to slave PTY
@@ -336,6 +380,30 @@ contains
         ! Disable local echo on the slave PTY to prevent character doubling
         ! The shell will echo characters back, which we'll display
         call disable_pty_echo(STDIN_FILENO)
+
+        ! Set window size AFTER dup2 - must use STDIN_FILENO which now points to slave PTY
+        ! This is the critical step for proper terminal size detection
+        if (debug_fd >= 0) then
+            write(debug_fd, '(A)') "DEBUG [child]: About to call TIOCSWINSZ on STDIN_FILENO"
+        end if
+
+        if (ioctl(STDIN_FILENO, TIOCSWINSZ, c_loc(ws)) /= 0) then
+            if (debug_fd >= 0) then
+                write(debug_fd, '(A,I0)') "ERROR [child]: TIOCSWINSZ on stdin failed with errno: ", errno_val()
+            end if
+        else
+            if (debug_fd >= 0) then
+                write(debug_fd, '(A,I0,A,I0,A)') "SUCCESS [child]: Window size set to ", &
+                    cols, " cols x ", rows, " rows"
+            end if
+        end if
+
+        ! Close debug fd
+        if (debug_fd >= 0) then
+            if (c_close(debug_fd) < 0) then
+                ! Can't log this since we're closing the debug fd
+            end if
+        end if
 
         ! Close slave fd (already duplicated)
         if (slave_fd > 2) then
@@ -360,28 +428,23 @@ contains
         shell_cstr(slen+1:slen+1) = c_null_char
 
         ! Set TERM environment variable so shell knows terminal capabilities
+        ! NOTE: No debug output here - stdout/stderr already redirected to PTY!
         if (setenv("TERM" // c_null_char, "xterm-256color" // c_null_char, 1) /= 0) then
-            write(2, '(A)') "ERROR: Failed to set TERM environment variable"
-        else
-            write(2, '(A)') "DEBUG: Set TERM=xterm-256color for child shell"
+            ! ERROR: Failed to set TERM (can't print - would go to terminal)
         end if
 
         ! Set COLUMNS and LINES to help shell understand terminal size
         write(cols_str, '(I0)') cols
         write(rows_str, '(I0)') rows
-        if (setenv("COLUMNS" // c_null_char, trim(cols_str) // c_null_char, 1) /= 0) then
-            print *, "Warning: Failed to set COLUMNS"
-        end if
-        if (setenv("LINES" // c_null_char, trim(rows_str) // c_null_char, 1) /= 0) then
-            print *, "Warning: Failed to set LINES"
-        end if
+        ! NOTE: No debug output - stdout/stderr already redirected to PTY!
+        ret = setenv("COLUMNS" // c_null_char, trim(cols_str) // c_null_char, 1)
+        ret = setenv("LINES" // c_null_char, trim(rows_str) // c_null_char, 1)
 
-        ! Disable zsh PROMPT_SP to prevent excessive space output during initialization
-        ! PROMPT_SP causes zsh to fill terminal with spaces, causing scrolling issues
-        ! Must unset (not just set to empty) for zsh to properly disable the feature
-        if (unsetenv("PROMPT_SP" // c_null_char) /= 0) then
-            write(2, '(A)') "Warning: Failed to unset PROMPT_SP"
-        end if
+        ! Disable zsh PROMPT_SP feature by unsetting the environment variable
+        ! This prevents zsh from outputting padding spaces at startup
+        ! PROMPT_SP outputs spaces to preserve partial lines, which causes scrolling issues
+        ! NOTE: No debug output - stdout/stderr already redirected to PTY!
+        ret = unsetenv("PROMPT_SP" // c_null_char)
 
         ! Execute shell with -i flag (interactive)
         dash_i = "-i" // c_null_char

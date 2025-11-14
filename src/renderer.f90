@@ -151,6 +151,9 @@ contains
         this%window_height = height
         call glViewport(0, 0, width, height)
 
+        ! Debug logging
+        print '(A,I0,A,I0)', "DEBUG: Renderer viewport set to: ", width, "x", height
+
         ! Enable blending for text
         call glEnable(GL_BLEND)
         call glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
