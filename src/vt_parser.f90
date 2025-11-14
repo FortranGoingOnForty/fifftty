@@ -35,6 +35,9 @@ module vt_parser
         ! Saved cursor position for save/restore operations
         integer :: saved_cursor_row = 0
         integer :: saved_cursor_col = 0
+        ! UTF-8 decoder state
+        integer :: utf8_bytes_needed = 0    ! How many continuation bytes we're expecting
+        integer :: utf8_codepoint = 0       ! Accumulator for the codepoint being built
     contains
         procedure :: reset => parser_reset
         procedure :: process_byte => parser_process_byte
@@ -55,6 +58,8 @@ contains
         this%current_fg = COLOR_DEFAULT
         this%current_bg = COLOR_DEFAULT
         this%current_attrs = 0
+        this%utf8_bytes_needed = 0
+        this%utf8_codepoint = 0
     end subroutine parser_reset
 
     ! Set PTY for sending responses
@@ -69,6 +74,15 @@ contains
         class(parser_t), intent(inout) :: this
         type(grid_t), intent(inout) :: grid
         integer, intent(in) :: byte
+
+        ! DEBUG: Log ALL bytes to trace state machine
+        if (DEBUG_SEQUENCES) then
+            if (byte >= 32 .and. byte <= 126) then
+                print '(A,I0,A,A,A,I0)', ">> BYTE: ", byte, " ('", char(byte), "') state=", this%state
+            else
+                print '(A,I0,A,Z2.2,A,I0)', ">> BYTE: ", byte, " (0x", byte, ") state=", this%state
+            end if
+        end if
 
         select case (this%state)
         case (STATE_GROUND)
@@ -146,16 +160,56 @@ contains
         type(grid_t), intent(inout) :: grid
         integer, intent(in) :: byte
 
+        ! DEBUG: Log unexpected '0' or 'q' in GROUND state
+        if (DEBUG_SEQUENCES .and. (byte == 48 .or. byte == 113)) then
+            print '(A,I0,A,A,A)', "BUG: GROUND got byte ", byte, " ('", char(byte), "') - should be in CSI?"
+        end if
+
+        ! First, check if we're in the middle of a UTF-8 sequence
+        if (parser%utf8_bytes_needed > 0) then
+            ! We're expecting a UTF-8 continuation byte (10xxxxxx = 0x80-0xBF)
+            if (byte >= 128 .and. byte <= 191) then  ! Valid continuation byte
+                ! Extract the 6 data bits and add them to our codepoint
+                parser%utf8_codepoint = ishft(parser%utf8_codepoint, 6) + iand(byte, 63)
+                parser%utf8_bytes_needed = parser%utf8_bytes_needed - 1
+
+                ! If we've received all bytes, write the complete character
+                if (parser%utf8_bytes_needed == 0) then
+                    if (DEBUG_SEQUENCES) then
+                        print '(A,I0,A,Z0)', "DEBUG: UTF-8 complete, codepoint: ", &
+                              parser%utf8_codepoint, " (0x", parser%utf8_codepoint, ")"
+                    end if
+                    call write_char(parser, grid, parser%utf8_codepoint)
+                    parser%utf8_codepoint = 0
+                end if
+            else
+                ! Invalid UTF-8 sequence - reset and treat this byte normally
+                if (DEBUG_SEQUENCES) then
+                    print '(A,I0,A)', "WARNING: Invalid UTF-8 continuation byte: ", byte, " - resetting"
+                end if
+                parser%utf8_bytes_needed = 0
+                parser%utf8_codepoint = 0
+                ! Fall through to handle this byte normally
+            end if
+
+            ! If we consumed a valid continuation byte, we're done
+            if (parser%utf8_bytes_needed > 0 .or. (byte >= 128 .and. byte <= 191)) return
+        end if
+
+        ! Normal byte processing (not in UTF-8 sequence, or after resetting)
         if (byte == 27) then  ! ESC
             parser%state = STATE_ESCAPE
         else if (byte == 10) then  ! LF (newline)
             call handle_newline(grid)
         else if (byte == 13) then  ! CR (carriage return)
             grid%cursor_col = 1
+            grid%pending_wrap = .false.  ! Clear pending wrap on CR
         else if (byte == 8) then  ! BS (backspace)
             if (grid%cursor_col > 1) grid%cursor_col = grid%cursor_col - 1
+            grid%pending_wrap = .false.  ! Clear pending wrap on backspace
         else if (byte == 9) then  ! HT (tab)
             grid%cursor_col = ((grid%cursor_col - 1) / 8 + 1) * 8 + 1
+            grid%pending_wrap = .false.  ! Clear pending wrap on tab
             if (grid%cursor_col > grid%cols) call handle_newline(grid)
         else if (byte >= 32 .and. byte <= 126) then  ! Printable ASCII
             call write_char(parser, grid, byte)
@@ -169,12 +223,36 @@ contains
             if (DEBUG_SEQUENCES) then
                 print '(A,I0,A,Z2.2)', "DEBUG: Ignored control char: ", byte, " (0x", byte, ")"
             end if
-        else if (byte > 126) then  ! Extended ASCII/UTF-8
-            if (DEBUG_SEQUENCES) then
-                print '(A,I0,A,Z2.2)', "DEBUG: Extended char: ", byte, " (0x", byte, ")"
+        else if (byte > 126) then  ! UTF-8 start bytes
+            ! Determine how many bytes this UTF-8 character needs
+            if (byte >= 192 .and. byte <= 223) then
+                ! 2-byte sequence: 110xxxxx 10xxxxxx
+                parser%utf8_bytes_needed = 1
+                parser%utf8_codepoint = iand(byte, 31)  ! Extract 5 data bits
+                if (DEBUG_SEQUENCES) then
+                    print '(A,I0,A,Z2.2)', "DEBUG: UTF-8 2-byte start: ", byte, " (0x", byte, ")"
+                end if
+            else if (byte >= 224 .and. byte <= 239) then
+                ! 3-byte sequence: 1110xxxx 10xxxxxx 10xxxxxx
+                parser%utf8_bytes_needed = 2
+                parser%utf8_codepoint = iand(byte, 15)  ! Extract 4 data bits
+                if (DEBUG_SEQUENCES) then
+                    print '(A,I0,A,Z2.2)', "DEBUG: UTF-8 3-byte start: ", byte, " (0x", byte, ")"
+                end if
+            else if (byte >= 240 .and. byte <= 247) then
+                ! 4-byte sequence: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
+                parser%utf8_bytes_needed = 3
+                parser%utf8_codepoint = iand(byte, 7)   ! Extract 3 data bits
+                if (DEBUG_SEQUENCES) then
+                    print '(A,I0,A,Z2.2)', "DEBUG: UTF-8 4-byte start: ", byte, " (0x", byte, ")"
+                end if
+            else
+                ! Invalid UTF-8 start byte - write as '?'
+                if (DEBUG_SEQUENCES) then
+                    print '(A,I0,A,Z2.2)', "WARNING: Invalid UTF-8 start byte: ", byte, " (0x", byte, ")"
+                end if
+                call write_char(parser, grid, 63)  ! '?'
             end if
-            ! For now, just write it as-is (will show as '?' likely)
-            call write_char(parser, grid, byte)
         end if
     end subroutine handle_ground
 
@@ -193,18 +271,30 @@ contains
         end if
 
         if (byte == 91) then  ! '[' - CSI sequence
+            if (DEBUG_SEQUENCES) then
+                print '(A,I0,A,I0,A)', "STATE CHANGE: ESCAPE → CSI_ENTRY (old=", parser%state, " new=", STATE_CSI_ENTRY, ")"
+            end if
             parser%state = STATE_CSI_ENTRY
             parser%params = 0
             parser%num_params = 0
             parser%intermediates = ""
             parser%private_mode = .false.
         else if (byte == 93) then  ! ']' - OSC sequence
+            if (DEBUG_SEQUENCES) then
+                print '(A)', "DEBUG OSC: === ENTERING OSC STATE ==="
+            end if
             parser%state = STATE_OSC_STRING
         else if (byte == 80) then  ! 'P' - DCS (Device Control String)
+            if (DEBUG_SEQUENCES) then
+                print '(A)', "DEBUG DCS: === ENTERING DCS STATE ==="
+            end if
             parser%state = STATE_DCS_STRING
         else if (byte == 92) then  ! '\' - String terminator (ST)
             ! ESC \ terminates OSC/DCS/APC/PM/SOS sequences
             ! Just consume it and return to ground
+            if (DEBUG_SEQUENCES) then
+                print '(A)', "DEBUG OSC: Saw backslash (ST terminator), returning to GROUND"
+            end if
             parser%state = STATE_GROUND
         else if (byte == 61) then  ! '=' - DECPAM (application keypad mode)
             ! Phase 1: ignore keypad mode changes
@@ -247,13 +337,27 @@ contains
 
         ! Check for terminator
         if (byte == 7) then  ! BEL - terminate OSC
+            if (DEBUG_SEQUENCES) then
+                print '(A)', "DEBUG OSC: Terminated by BEL, returning to GROUND"
+            end if
             parser%state = STATE_GROUND
         else if (byte == 27) then  ! ESC - might be ESC \ terminator
+            if (DEBUG_SEQUENCES) then
+                print '(A)', "DEBUG OSC: Saw ESC, transitioning to ESCAPE state (expecting backslash)"
+            end if
             ! For simplicity, treat ESC as terminator and return to ESCAPE state
             ! This handles ESC \ (next byte will be \) and other ESC sequences
             parser%state = STATE_ESCAPE
+        else
+            ! All other bytes are consumed and ignored (Phase 1: no OSC handling)
+            if (DEBUG_SEQUENCES) then
+                if (byte >= 32 .and. byte <= 126) then
+                    print '(A,I0,A,A,A)', "DEBUG OSC: Consuming byte ", byte, " ('", char(byte), "')"
+                else
+                    print '(A,I0,A,Z2.2,A)', "DEBUG OSC: Consuming byte ", byte, " (0x", byte, ")"
+                end if
+            end if
         end if
-        ! All other bytes are consumed and ignored (Phase 1: no OSC handling)
     end subroutine handle_osc_string
 
     ! Handle DCS_STRING state (Device Control String)
@@ -265,12 +369,26 @@ contains
 
         ! Check for terminator
         if (byte == 7) then  ! BEL - terminate DCS
+            if (DEBUG_SEQUENCES) then
+                print '(A)', "DEBUG DCS: Terminated by BEL, returning to GROUND"
+            end if
             parser%state = STATE_GROUND
         else if (byte == 27) then  ! ESC - might be ESC \ terminator
+            if (DEBUG_SEQUENCES) then
+                print '(A)', "DEBUG DCS: Saw ESC, transitioning to ESCAPE state (expecting backslash)"
+            end if
             ! Return to ESCAPE state to handle the backslash
             parser%state = STATE_ESCAPE
+        else
+            ! All other bytes are consumed and ignored (Phase 1: no DCS handling)
+            if (DEBUG_SEQUENCES) then
+                if (byte >= 32 .and. byte <= 126) then
+                    print '(A,I0,A,A,A)', "DEBUG DCS: Consuming byte ", byte, " ('", char(byte), "')"
+                else
+                    print '(A,I0,A,Z2.2,A)', "DEBUG DCS: Consuming byte ", byte, " (0x", byte, ")"
+                end if
+            end if
         end if
-        ! All other bytes are consumed and ignored (Phase 1: no DCS handling)
     end subroutine handle_dcs_string
 
     ! Handle CSI_ENTRY state
@@ -279,8 +397,16 @@ contains
         type(grid_t), intent(inout) :: grid
         integer, intent(in) :: byte
 
+        if (DEBUG_SEQUENCES .and. byte == 91) then
+            print '(A,I0)', "BUG: handle_csi_entry called with '[' (byte 91)! This should never happen!"
+        end if
+
         if (byte == 63) then  ! '?' - DEC private mode
             parser%private_mode = .true.
+            parser%state = STATE_CSI_PARAM
+            parser%num_params = 0
+        else if (byte >= 60 .and. byte <= 62) then  ! '<' '=' '>' - private/experimental markers
+            ! Treat like '?' but don't set private_mode for now (Phase 1: ignore)
             parser%state = STATE_CSI_PARAM
             parser%num_params = 0
         else if (byte >= 48 .and. byte <= 57) then  ! '0'-'9'
@@ -302,6 +428,7 @@ contains
         type(parser_t), intent(inout) :: parser
         type(grid_t), intent(inout) :: grid
         integer, intent(in) :: byte
+        integer :: i
 
         if (byte >= 48 .and. byte <= 57) then  ! '0'-'9'
             ! If first digit after '?', initialize first param
@@ -309,13 +436,40 @@ contains
                 parser%num_params = 1
                 parser%params(1) = 0
             end if
+            if (DEBUG_SEQUENCES .and. parser%params(parser%num_params) > 1000) then
+                print '(A,I0,A,I0,A,I0)', "WARNING: CSI param getting huge: ", &
+                    parser%params(parser%num_params), " adding digit ", (byte-48), &
+                    " num_params=", parser%num_params
+            end if
             parser%params(parser%num_params) = parser%params(parser%num_params) * 10 + (byte - 48)
+            if (DEBUG_SEQUENCES .and. byte == 48) then
+                print '(A,I0)', "DEBUG: CSI_PARAM got '0', params=", parser%num_params
+            end if
         else if (byte == 59) then  ! ';' - parameter separator
             if (parser%num_params < MAX_PARAMS) then
                 parser%num_params = parser%num_params + 1
                 parser%params(parser%num_params) = 0
             end if
+        else if (byte >= 32 .and. byte <= 47) then  ! Intermediate bytes (0x20-0x2F)
+            ! Store intermediate byte and transition to CSI_INTERMEDIATE state
+            ! This handles sequences like CSI Ps SP q (DECSCUSR)
+            if (len_trim(parser%intermediates) < len(parser%intermediates)) then
+                parser%intermediates = trim(parser%intermediates) // char(byte)
+            end if
+            parser%state = STATE_CSI_INTERMEDIATE
         else if (byte >= 64 .and. byte <= 126) then  ! Final byte
+            if (DEBUG_SEQUENCES .and. byte == 113) then
+                print '(A,I0)', "DEBUG: CSI_PARAM got 'q' final, params=", parser%num_params
+            end if
+            ! Defensive: clamp parameters to prevent overflow (max reasonable value 10000)
+            do i = 1, parser%num_params
+                if (parser%params(i) > 10000) then
+                    if (DEBUG_SEQUENCES) then
+                        print '(A,I0,A)', "WARNING: Clamping huge CSI param ", parser%params(i), " to 10000"
+                    end if
+                    parser%params(i) = 10000
+                end if
+            end do
             call execute_csi(parser, grid, char(byte))
             parser%state = STATE_GROUND
             parser%private_mode = .false.
@@ -357,10 +511,27 @@ contains
             param_str = ""
         end if
 
-        ! Phase 1: Ignore DEC private mode sequences (ESC[?...)
+        ! Handle DEC private mode sequences (ESC[?...)
         if (parser%private_mode) then
             if (DEBUG_SEQUENCES) then
                 print '(A,A,A,A,A)', "DEBUG: CSI ? ", trim(param_str), " ", final_byte, " (DEC private mode)"
+            end if
+            ! Handle key DEC private modes
+            if (parser%num_params >= 1) then
+                select case (parser%params(1))
+                case (1049)  ! Alternate screen buffer with cursor save/restore
+                    ! Phase 1: Completely ignore alternate screen
+                    ! This avoids clearing issues while fish/zsh initialize
+                    ! Proper implementation would need two separate screen buffers
+                    if (DEBUG_SEQUENCES) then
+                        if (final_byte == 'h') then
+                            print '(A)', "ALT_SCREEN ENTER: ignored"
+                        else if (final_byte == 'l') then
+                            print '(A)', "ALT_SCREEN EXIT: ignored"
+                        end if
+                    end if
+                    ! Do nothing - let fish use the main screen for everything
+                end select
             end if
             return
         end if
@@ -373,10 +544,16 @@ contains
         case ('A')  ! CUU - Cursor Up
             n = max(1, parser%params(1))
             grid%cursor_row = max(1, grid%cursor_row - n)
+            if (DEBUG_SEQUENCES) then
+                print '(A,I0,A,I0)', "CURSOR UP by ", n, " -> row=", grid%cursor_row
+            end if
 
         case ('B')  ! CUD - Cursor Down
             n = max(1, parser%params(1))
             grid%cursor_row = min(grid%rows, grid%cursor_row + n)
+            if (DEBUG_SEQUENCES) then
+                print '(A,I0,A,I0)', "CURSOR DOWN by ", n, " -> row=", grid%cursor_row
+            end if
 
         case ('C')  ! CUF - Cursor Forward
             n = max(1, parser%params(1))
@@ -406,11 +583,14 @@ contains
             call handle_sgr(parser, grid)
 
         case ('c')  ! DA - Device Attributes
-            ! Send VT100 response: ESC [ ? 1 ; 2 c
+            ! Send modern xterm-256color response: ESC [ ? 6 2 ; 9 ; 2 2 c
+            ! Params: 62=VT220, 9=National replacement charset, 22=Color text
+            ! This matches what modern xterm/alacritty/wezterm send
+            ! Tells zsh we're a capable modern terminal with proper cursor control
             if (DEBUG_SEQUENCES) then
-                print '(A)', "IMPORTANT: Received CSI c (Device Attributes), sending ESC[?1;2c"
+                print '(A)', "IMPORTANT: Received CSI c (Device Attributes), sending ESC[?62;9;22c (VT220+color)"
             end if
-            call send_response(parser, char(27) // "[?1;2c")
+            call send_response(parser, char(27) // "[?62;9;22c")
 
         case ('n')  ! DSR - Device Status Report
             if (parser%num_params >= 1 .and. parser%params(1) == 6) then
@@ -476,6 +656,17 @@ contains
         case ('u')  ! RCP - Restore Cursor Position (non-standard but common)
             if (parser%saved_cursor_row > 0 .and. parser%saved_cursor_col > 0) then
                 call grid%move_cursor(parser%saved_cursor_row, parser%saved_cursor_col)
+            end if
+
+        case ('q')  ! DECSCUSR - Set Cursor Style
+            ! CSI n q where n is: 0=blink block, 1=blink block, 2=steady block, 3=blink underline, etc.
+            ! Phase 1: Just consume and ignore - we'll implement cursor styles in Phase 6
+            if (DEBUG_SEQUENCES) then
+                if (parser%num_params >= 1) then
+                    print '(A,I0)', "DEBUG: CSI q (cursor style) param: ", parser%params(1)
+                else
+                    print '(A)', "DEBUG: CSI q (cursor style) no params"
+                end if
             end if
 
         case default
@@ -545,8 +736,10 @@ contains
                         i = i + 2  ! Skip next two parameters
                     else if (parser%params(i + 1) == 2 .and. i + 4 <= parser%num_params) then
                         ! 24-bit color: ESC[38;2;{r};{g};{b}m
-                        ! For now, approximate to nearest 256-color
-                        ! TODO: Add true 24-bit color support
+                        ! Pack RGB into negative integer: -(R*65536 + G*256 + B + 1)
+                        parser%current_fg = -(parser%params(i + 2) * 65536 + &
+                                               parser%params(i + 3) * 256 + &
+                                               parser%params(i + 4) + 1)
                         i = i + 4  ! Skip next four parameters
                     end if
                 end if
@@ -565,7 +758,10 @@ contains
                         i = i + 2  ! Skip next two parameters
                     else if (parser%params(i + 1) == 2 .and. i + 4 <= parser%num_params) then
                         ! 24-bit color: ESC[48;2;{r};{g};{b}m
-                        ! TODO: Add true 24-bit color support
+                        ! Pack RGB into negative integer: -(R*65536 + G*256 + B + 1)
+                        parser%current_bg = -(parser%params(i + 2) * 65536 + &
+                                               parser%params(i + 3) * 256 + &
+                                               parser%params(i + 4) + 1)
                         i = i + 4  ! Skip next four parameters
                     end if
                 end if
@@ -610,7 +806,13 @@ contains
                 call grid%set_cell(grid%cursor_row, col, 32, COLOR_DEFAULT, COLOR_DEFAULT, 0)
             end do
         case (2, 3)  ! Clear entire screen
+            ! VT100 spec: ED 2 does NOT move cursor - cursor stays at current position
+            ! Save cursor position, clear, then restore
+            row = grid%cursor_row
+            col = grid%cursor_col
             call grid%clear()
+            grid%cursor_row = row
+            grid%cursor_col = col
         end select
     end subroutine erase_display
 
@@ -634,21 +836,158 @@ contains
         end select
     end subroutine erase_line
 
+    ! Get the display width of a Unicode character (wcwidth equivalent)
+    ! Returns: 0 for zero-width, 1 for normal, 2 for double-width
+    function get_char_width(codepoint) result(width)
+        integer, intent(in) :: codepoint
+        integer :: width
+
+        ! Zero-width characters
+        if (codepoint == 0) then
+            width = 0
+            return
+        end if
+
+        ! Combining marks and other zero-width (U+0300-U+036F, U+1AB0-U+1AFF, etc.)
+        if ((codepoint >= 768 .and. codepoint <= 879) .or. &     ! Combining Diacritical Marks
+            (codepoint >= 6832 .and. codepoint <= 6911) .or. &   ! Combining Diacritical Marks Extended
+            (codepoint >= 7616 .and. codepoint <= 7679) .or. &   ! Combining Diacritical Marks Supplement
+            (codepoint >= 8400 .and. codepoint <= 8447)) then    ! Combining Marks for Symbols
+            width = 0
+            return
+        end if
+
+        ! Double-width characters (East Asian Wide and Fullwidth)
+        ! CJK Unified Ideographs: U+4E00-U+9FFF
+        if (codepoint >= 19968 .and. codepoint <= 40959) then
+            width = 2
+            return
+        end if
+
+        ! Hangul Syllables: U+AC00-U+D7AF
+        if (codepoint >= 44032 .and. codepoint <= 55215) then
+            width = 2
+            return
+        end if
+
+        ! Fullwidth Latin: U+FF00-U+FF60
+        if (codepoint >= 65280 .and. codepoint <= 65376) then
+            width = 2
+            return
+        end if
+
+        ! Emoji and symbols (common double-width ranges)
+        ! Miscellaneous Symbols and Pictographs: U+1F300-U+1F5FF
+        if (codepoint >= 127744 .and. codepoint <= 128511) then
+            width = 2
+            return
+        end if
+
+        ! Emoticons: U+1F600-U+1F64F
+        if (codepoint >= 128512 .and. codepoint <= 128591) then
+            width = 2
+            return
+        end if
+
+        ! Transport and Map Symbols: U+1F680-U+1F6FF
+        if (codepoint >= 128640 .and. codepoint <= 128767) then
+            width = 2
+            return
+        end if
+
+        ! Supplemental Symbols and Pictographs: U+1F900-U+1F9FF
+        if (codepoint >= 129280 .and. codepoint <= 129535) then
+            width = 2
+            return
+        end if
+
+        ! Dingbats: U+2700-U+27BF (includes checkmarks, crosses, etc.)
+        if (codepoint >= 9984 .and. codepoint <= 10175) then
+            width = 2
+            return
+        end if
+
+        ! Miscellaneous Symbols: U+2600-U+26FF
+        if (codepoint >= 9728 .and. codepoint <= 9983) then
+            width = 2
+            return
+        end if
+
+        ! Default to single-width
+        width = 1
+    end function get_char_width
+
     ! Write a character to the grid
     subroutine write_char(parser, grid, codepoint)
         type(parser_t), intent(in) :: parser
         type(grid_t), intent(inout) :: grid
         integer, intent(in) :: codepoint
+        integer :: char_width
+        integer :: prev_col
+        type(cell_t) :: cell
+
+        ! DEBUG: Log characters being written
+        if (DEBUG_SEQUENCES .and. (codepoint == 48 .or. codepoint == 113)) then
+            if (codepoint >= 32 .and. codepoint <= 126) then
+                print '(A,I0,A,A,A,I0,A,I0,A,I0)', "WRITECHAR: Writing '", codepoint, " ('", char(codepoint), &
+                      "') at row=", grid%cursor_row, " col=", grid%cursor_col, " parser_state=", parser%state
+            end if
+        end if
+
+        ! VT100 pending wrap: if we're in pending wrap state, perform the wrap now
+        if (grid%pending_wrap) then
+            call handle_newline(grid)
+            grid%pending_wrap = .false.
+        end if
+
+        ! Get the display width of this character
+        char_width = get_char_width(codepoint)
+
+        if (DEBUG_SEQUENCES .and. char_width > 1) then
+            print '(A,I0,A,I0)', "DEBUG: Double-width char! Width=", char_width, &
+                  " cursor_col before: ", grid%cursor_col
+        end if
+
+        ! If we're about to overwrite a wide char continuation cell (marked with codepoint 0),
+        ! clear the preceding cell that contains the actual wide character
+        if (grid%cursor_col > 1) then
+            cell = grid%get_cell(grid%cursor_row, grid%cursor_col)
+            if (cell%codepoint == 0) then
+                ! This is a wide char continuation - clear the preceding cell
+                call grid%set_cell(grid%cursor_row, grid%cursor_col - 1, 32, &
+                                  parser%current_fg, parser%current_bg, 0)
+            end if
+        end if
 
         ! Write character at cursor position
         call grid%set_cell(grid%cursor_row, grid%cursor_col, codepoint, &
                           parser%current_fg, parser%current_bg, parser%current_attrs)
 
-        ! Advance cursor
-        grid%cursor_col = grid%cursor_col + 1
+        ! For double-width characters, mark the next cell as a continuation (codepoint 0)
+        if (char_width == 2 .and. grid%cursor_col < grid%cols) then
+            call grid%set_cell(grid%cursor_row, grid%cursor_col + 1, 0, &
+                              parser%current_fg, parser%current_bg, parser%current_attrs)
+            if (DEBUG_SEQUENCES) then
+                print '(A,I0,A)', "DEBUG: Marked col ", grid%cursor_col + 1, " as wide char continuation"
+            end if
+        end if
 
-        ! Wrap to next line if needed
-        if (grid%cursor_col > grid%cols) then
+        ! Advance cursor by character width (1 or 2 columns)
+        prev_col = grid%cursor_col
+        grid%cursor_col = grid%cursor_col + char_width
+
+        if (DEBUG_SEQUENCES .and. char_width > 1) then
+            print '(A,I0)', "DEBUG: cursor_col after: ", grid%cursor_col
+        end if
+
+        ! VT100 pending wrap behavior: if cursor is exactly at cols+1, don't wrap yet
+        ! Instead, clamp cursor to last column and set pending_wrap flag
+        ! The wrap will happen when the NEXT character is written
+        if (grid%cursor_col == grid%cols + 1) then
+            grid%cursor_col = grid%cols
+            grid%pending_wrap = .true.
+        else if (grid%cursor_col > grid%cols + 1) then
+            ! For double-width chars that go past cols+1, wrap immediately
             call handle_newline(grid)
         end if
     end subroutine write_char
@@ -656,14 +995,23 @@ contains
     ! Handle newline
     subroutine handle_newline(grid)
         type(grid_t), intent(inout) :: grid
+        logical, parameter :: DEBUG_NEWLINES = .true.
+
+        if (DEBUG_NEWLINES) then
+            print '(A,I0,A,I0)', "NEWLINE: row ", grid%cursor_row, " -> ", grid%cursor_row + 1
+        end if
 
         grid%cursor_row = grid%cursor_row + 1
         grid%cursor_col = 1
+        grid%pending_wrap = .false.  ! Clear pending wrap on newline
 
         ! Scroll if at bottom
         if (grid%cursor_row > grid%rows) then
             call grid%scroll_up()
             grid%cursor_row = grid%rows
+            if (DEBUG_NEWLINES) then
+                print '(A,I0)', "NEWLINE: scrolled, clamped to row=", grid%rows
+            end if
         end if
     end subroutine handle_newline
 

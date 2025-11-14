@@ -82,10 +82,20 @@ contains
     subroutine get_ansi_color(color_index, r, g, b)
         integer, intent(in) :: color_index
         real(GLfloat), intent(out) :: r, g, b
-        integer :: idx, ir, ig, ib
+        integer :: idx, ir, ig, ib, rgb_packed
 
+        ! Check for truecolor (negative value indicates packed RGB)
+        if (color_index < 0 .and. color_index /= COLOR_DEFAULT) then
+            ! Unpack RGB: -(R*65536 + G*256 + B + 1)
+            rgb_packed = -(color_index + 1)
+            ir = rgb_packed / 65536
+            ig = mod(rgb_packed / 256, 256)
+            ib = mod(rgb_packed, 256)
+            r = real(ir) / 255.0
+            g = real(ig) / 255.0
+            b = real(ib) / 255.0
         ! Default to white if COLOR_DEFAULT
-        if (color_index == COLOR_DEFAULT .or. color_index < 0) then
+        else if (color_index == COLOR_DEFAULT) then
             r = 1.0
             g = 1.0
             b = 1.0
