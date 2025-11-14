@@ -95,6 +95,9 @@ contains
         call gtk_widget_add_controller(gl_area, key_controller)
         call connect_key_signals(key_controller)
 
+        ! Set up mouse input
+        call setup_mouse_input(gl_area)
+
         ! Show window
         call gtk_window_present(window)
 
@@ -134,5 +137,24 @@ contains
         handler_id = g_signal_connect(controller, "key-pressed", &
                                       c_funloc(key_pressed_callback), c_null_ptr)
     end subroutine connect_key_signals
+
+    ! Set up mouse input controllers
+    subroutine setup_mouse_input(gl_area)
+        type(c_ptr), intent(in) :: gl_area
+        type(c_ptr) :: click_controller, motion_controller
+        integer(c_long) :: handler_id
+
+        ! Create gesture controller for button clicks
+        click_controller = gtk_gesture_click_new()
+        call gtk_widget_add_controller(gl_area, click_controller)
+        handler_id = g_signal_connect(click_controller, "pressed", &
+                                      c_funloc(mouse_button_pressed_callback), c_null_ptr)
+
+        ! Create motion controller for mouse movement
+        motion_controller = gtk_event_controller_motion_new()
+        call gtk_widget_add_controller(gl_area, motion_controller)
+        handler_id = g_signal_connect(motion_controller, "motion", &
+                                      c_funloc(mouse_motion_callback), c_null_ptr)
+    end subroutine setup_mouse_input
 
 end program fortty_main

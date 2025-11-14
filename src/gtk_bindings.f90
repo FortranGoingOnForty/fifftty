@@ -117,6 +117,16 @@ module gtk_bindings
             type(c_ptr) :: gtk_event_controller_key_new
         end function gtk_event_controller_key_new
 
+        function gtk_gesture_click_new() bind(c, name='gtk_gesture_click_new')
+            import :: c_ptr
+            type(c_ptr) :: gtk_gesture_click_new
+        end function gtk_gesture_click_new
+
+        function gtk_event_controller_motion_new() bind(c, name='gtk_event_controller_motion_new')
+            import :: c_ptr
+            type(c_ptr) :: gtk_event_controller_motion_new
+        end function gtk_event_controller_motion_new
+
         subroutine gtk_widget_add_controller(widget, controller) bind(c, name='gtk_widget_add_controller')
             import :: c_ptr
             type(c_ptr), value :: widget, controller

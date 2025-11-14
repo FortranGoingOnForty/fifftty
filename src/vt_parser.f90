@@ -41,6 +41,12 @@ module vt_parser
         ! DEC private mode states
         logical :: application_cursor_keys = .false.  ! ?1 - DECCKM
         logical :: bracketed_paste_mode = .false.     ! ?2004
+        ! Mouse tracking modes
+        logical :: mouse_tracking_x10 = .false.       ! ?9 - X10 mouse
+        logical :: mouse_tracking_vt200 = .false.     ! ?1000 - VT200 mouse
+        logical :: mouse_tracking_btn = .false.       ! ?1002 - Button event tracking
+        logical :: mouse_tracking_any = .false.       ! ?1003 - Any event tracking
+        logical :: mouse_tracking_sgr = .false.       ! ?1006 - SGR extended mode
         ! OSC string buffer
         character(len=1024) :: osc_buffer = ""
         integer :: osc_buffer_len = 0
@@ -570,6 +576,46 @@ contains
                     else if (final_byte == 'l') then
                         call grid%switch_to_main_screen()
                         if (DEBUG_SEQUENCES) print '(A)', "ALT_SCREEN: Switched to main screen"
+                    end if
+                case (9)  ! X10 mouse reporting
+                    if (final_byte == 'h') then
+                        parser%mouse_tracking_x10 = .true.
+                        if (DEBUG_SEQUENCES) print '(A)', "MOUSE: X10 mode enabled"
+                    else if (final_byte == 'l') then
+                        parser%mouse_tracking_x10 = .false.
+                        if (DEBUG_SEQUENCES) print '(A)', "MOUSE: X10 mode disabled"
+                    end if
+                case (1000)  ! VT200 mouse reporting
+                    if (final_byte == 'h') then
+                        parser%mouse_tracking_vt200 = .true.
+                        if (DEBUG_SEQUENCES) print '(A)', "MOUSE: VT200 mode enabled"
+                    else if (final_byte == 'l') then
+                        parser%mouse_tracking_vt200 = .false.
+                        if (DEBUG_SEQUENCES) print '(A)', "MOUSE: VT200 mode disabled"
+                    end if
+                case (1002)  ! Button event tracking
+                    if (final_byte == 'h') then
+                        parser%mouse_tracking_btn = .true.
+                        if (DEBUG_SEQUENCES) print '(A)', "MOUSE: Button event tracking enabled"
+                    else if (final_byte == 'l') then
+                        parser%mouse_tracking_btn = .false.
+                        if (DEBUG_SEQUENCES) print '(A)', "MOUSE: Button event tracking disabled"
+                    end if
+                case (1003)  ! Any event tracking
+                    if (final_byte == 'h') then
+                        parser%mouse_tracking_any = .true.
+                        if (DEBUG_SEQUENCES) print '(A)', "MOUSE: Any event tracking enabled"
+                    else if (final_byte == 'l') then
+                        parser%mouse_tracking_any = .false.
+                        if (DEBUG_SEQUENCES) print '(A)', "MOUSE: Any event tracking disabled"
+                    end if
+                case (1006)  ! SGR extended mouse mode
+                    if (final_byte == 'h') then
+                        parser%mouse_tracking_sgr = .true.
+                        if (DEBUG_SEQUENCES) print '(A)', "MOUSE: SGR extended mode enabled"
+                    else if (final_byte == 'l') then
+                        parser%mouse_tracking_sgr = .false.
+                        if (DEBUG_SEQUENCES) print '(A)', "MOUSE: SGR extended mode disabled"
                     end if
                 case (2004)  ! Bracketed paste mode
                     if (final_byte == 'h') then

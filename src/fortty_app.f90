@@ -519,4 +519,94 @@ contains
         global_window = window
     end subroutine set_window
 
+    ! Mouse button pressed callback
+    subroutine mouse_button_pressed_callback(gesture, n_press, x, y, user_data) bind(c)
+        type(c_ptr), value :: gesture, user_data
+        integer(c_int), value :: n_press
+        real(c_double), value :: x, y
+        integer :: button, grid_col, grid_row, bytes_written
+        character(len=32) :: mouse_seq
+        integer :: seq_len
+
+        if (.not. initialized) return
+
+        ! Check if any mouse tracking mode is enabled
+        if (.not. (global_parser%mouse_tracking_x10 .or. &
+                   global_parser%mouse_tracking_vt200 .or. &
+                   global_parser%mouse_tracking_btn .or. &
+                   global_parser%mouse_tracking_any)) return
+
+        ! Get button number from GTK (1=left, 2=middle, 3=right)
+        ! For mouse reporting: 0=left, 1=middle, 2=right
+        button = 0  ! Default to left button
+
+        ! Convert pixel coordinates to grid coordinates
+        grid_col = int(x / real(global_renderer%cell_width)) + 1
+        grid_row = int(y / real(global_renderer%cell_height)) + 1
+
+        ! Clamp to grid bounds
+        if (grid_col < 1) grid_col = 1
+        if (grid_col > global_grid%cols) grid_col = global_grid%cols
+        if (grid_row < 1) grid_row = 1
+        if (grid_row > global_grid%rows) grid_row = global_grid%rows
+
+        ! Generate mouse report based on active mode
+        if (global_parser%mouse_tracking_sgr) then
+            ! SGR extended mode: ESC [ < Cb ; Cx ; Cy M
+            write(mouse_seq, '(A,I0,A,I0,A,I0,A)') char(27)//'[<', button, ';', grid_col, ';', grid_row, 'M'
+            seq_len = len_trim(mouse_seq)
+        else
+            ! X10/VT200 mode: ESC [ M Cb Cx Cy
+            mouse_seq(1:3) = char(27)//'[M'
+            mouse_seq(4:4) = char(button + 32)
+            mouse_seq(5:5) = char(grid_col + 32)
+            mouse_seq(6:6) = char(grid_row + 32)
+            seq_len = 6
+        end if
+
+        ! Send to PTY
+        bytes_written = global_pty%write(mouse_seq, seq_len)
+    end subroutine mouse_button_pressed_callback
+
+    ! Mouse motion callback
+    subroutine mouse_motion_callback(controller, x, y, user_data) bind(c)
+        type(c_ptr), value :: controller, user_data
+        real(c_double), value :: x, y
+        integer :: grid_col, grid_row, bytes_written
+        character(len=32) :: mouse_seq
+        integer :: seq_len
+
+        if (.not. initialized) return
+
+        ! Only report motion if "any event" tracking is enabled
+        if (.not. global_parser%mouse_tracking_any) return
+
+        ! Convert pixel coordinates to grid coordinates
+        grid_col = int(x / real(global_renderer%cell_width)) + 1
+        grid_row = int(y / real(global_renderer%cell_height)) + 1
+
+        ! Clamp to grid bounds
+        if (grid_col < 1) grid_col = 1
+        if (grid_col > global_grid%cols) grid_col = global_grid%cols
+        if (grid_row < 1) grid_row = 1
+        if (grid_row > global_grid%rows) grid_row = global_grid%rows
+
+        ! Generate mouse motion report
+        if (global_parser%mouse_tracking_sgr) then
+            ! SGR extended mode: ESC [ < Cb ; Cx ; Cy M (button 3 = motion)
+            write(mouse_seq, '(A,I0,A,I0,A,I0,A)') char(27)//'[<', 3, ';', grid_col, ';', grid_row, 'M'
+            seq_len = len_trim(mouse_seq)
+        else
+            ! X10/VT200 mode: ESC [ M Cb Cx Cy (button 35 = motion)
+            mouse_seq(1:3) = char(27)//'[M'
+            mouse_seq(4:4) = char(35)  ! 3 + 32 for motion
+            mouse_seq(5:5) = char(grid_col + 32)
+            mouse_seq(6:6) = char(grid_row + 32)
+            seq_len = 6
+        end if
+
+        ! Send to PTY
+        bytes_written = global_pty%write(mouse_seq, seq_len)
+    end subroutine mouse_motion_callback
+
 end module fortty_app
