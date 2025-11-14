@@ -149,6 +149,8 @@ contains
         call gtk_widget_add_controller(gl_area, click_controller)
         handler_id = g_signal_connect(click_controller, "pressed", &
                                       c_funloc(mouse_button_pressed_callback), c_null_ptr)
+        handler_id = g_signal_connect(click_controller, "released", &
+                                      c_funloc(mouse_button_released_callback), c_null_ptr)
 
         ! Create motion controller for mouse movement
         motion_controller = gtk_event_controller_motion_new()

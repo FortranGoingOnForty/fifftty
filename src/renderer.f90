@@ -558,6 +558,11 @@ contains
         call glActiveTexture(GL_TEXTURE0)
         call glBindTexture(GL_TEXTURE_2D, this%font_mgr%atlas_texture)
 
+        ! Zeroth pass: Draw selection highlight (if any)
+        if (grid%selection_active) then
+            call draw_selection_highlight(this, grid)
+        end if
+
         ! First pass: Draw all characters
         call glBindTexture(GL_TEXTURE_2D, this%font_mgr%atlas_texture)
         do row = 1, grid%rows
@@ -755,6 +760,53 @@ contains
         ! Rebind font texture for subsequent character rendering
         call glBindTexture(GL_TEXTURE_2D, this%font_mgr%atlas_texture)
     end subroutine draw_cursor
+
+    ! Draw selection highlight background
+    subroutine draw_selection_highlight(this, grid)
+        class(renderer_t), intent(inout) :: this
+        type(grid_t), intent(in) :: grid
+        integer :: row, col
+        real(GLfloat) :: x, y, w, h
+        real(GLfloat), target :: vertices(16)
+        integer(c_size_t) :: vertex_size
+
+        ! Bind white texture for solid color rendering
+        call glBindTexture(GL_TEXTURE_2D, this%white_texture)
+
+        ! Set selection color (blue tint with some transparency)
+        call glUniform3f(this%text_color_loc, 0.3, 0.5, 0.8)
+
+        ! Draw selection background for each selected cell
+        do row = 1, grid%rows
+            do col = 1, grid%cols
+                if (grid%is_cell_selected(row, col)) then
+                    ! Calculate cell position
+                    x = real((col - 1) * this%font_mgr%cell_advance + 20, GLfloat)
+                    y = real((row - 1) * this%font_mgr%line_height, GLfloat)
+                    w = real(this%font_mgr%cell_advance, GLfloat)
+                    h = real(this%font_mgr%line_height, GLfloat)
+
+                    ! Build vertex data for selection rectangle
+                    vertices = [ &
+                        x,     y + h, 0.0, 0.0, &
+                        x + w, y + h, 1.0, 0.0, &
+                        x,     y,     0.0, 1.0, &
+                        x + w, y,     1.0, 1.0 &
+                    ]
+
+                    vertex_size = int(16, c_size_t) * c_sizeof(vertices(1))
+
+                    ! Update VBO and draw selection background
+                    call glBindBuffer(GL_ARRAY_BUFFER, this%vbo)
+                    call glBufferData(GL_ARRAY_BUFFER, vertex_size, c_loc(vertices), GL_DYNAMIC_DRAW)
+                    call glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
+                end if
+            end do
+        end do
+
+        ! Rebind font texture for subsequent character rendering
+        call glBindTexture(GL_TEXTURE_2D, this%font_mgr%atlas_texture)
+    end subroutine draw_selection_highlight
 
     ! Create orthographic projection matrix
     subroutine create_ortho_matrix(matrix, left, right, bottom, top, near, far)

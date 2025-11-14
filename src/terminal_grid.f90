@@ -64,6 +64,12 @@ module terminal_grid
         logical :: use_alt_screen = .false.          ! True if alternate screen is active
         integer :: saved_cursor_row = 1              ! Saved cursor position
         integer :: saved_cursor_col = 1
+        ! Text selection
+        logical :: selection_active = .false.        ! True if text is selected
+        integer :: selection_start_row = 1           ! Selection start position
+        integer :: selection_start_col = 1
+        integer :: selection_end_row = 1             ! Selection end position
+        integer :: selection_end_col = 1
     contains
         procedure :: init => grid_init
         procedure :: destroy => grid_destroy
@@ -86,6 +92,10 @@ module terminal_grid
         procedure :: set_scroll_region => grid_set_scroll_region
         procedure :: switch_to_alt_screen => grid_switch_to_alt_screen
         procedure :: switch_to_main_screen => grid_switch_to_main_screen
+        procedure :: set_selection_start => grid_set_selection_start
+        procedure :: set_selection_end => grid_set_selection_end
+        procedure :: clear_selection => grid_clear_selection
+        procedure :: is_cell_selected => grid_is_cell_selected
     end type grid_t
 
 contains
@@ -520,5 +530,74 @@ contains
             end do
         end do
     end subroutine clear_buffer
+
+    ! Set selection start position (mouse button press)
+    subroutine grid_set_selection_start(this, row, col)
+        class(grid_t), intent(inout) :: this
+        integer, intent(in) :: row, col
+
+        this%selection_active = .true.
+        this%selection_start_row = row
+        this%selection_start_col = col
+        this%selection_end_row = row
+        this%selection_end_col = col
+    end subroutine grid_set_selection_start
+
+    ! Set selection end position (mouse drag)
+    subroutine grid_set_selection_end(this, row, col)
+        class(grid_t), intent(inout) :: this
+        integer, intent(in) :: row, col
+
+        if (.not. this%selection_active) return
+
+        this%selection_end_row = row
+        this%selection_end_col = col
+    end subroutine grid_set_selection_end
+
+    ! Clear selection
+    subroutine grid_clear_selection(this)
+        class(grid_t), intent(inout) :: this
+
+        this%selection_active = .false.
+        this%selection_start_row = 1
+        this%selection_start_col = 1
+        this%selection_end_row = 1
+        this%selection_end_col = 1
+    end subroutine grid_clear_selection
+
+    ! Check if a cell is within the selected region
+    function grid_is_cell_selected(this, row, col) result(selected)
+        class(grid_t), intent(in) :: this
+        integer, intent(in) :: row, col
+        logical :: selected
+        integer :: start_row, start_col, end_row, end_col
+        integer :: cell_pos, start_pos, end_pos
+
+        selected = .false.
+
+        if (.not. this%selection_active) return
+
+        ! Normalize selection (start <= end)
+        if (this%selection_start_row < this%selection_end_row .or. &
+            (this%selection_start_row == this%selection_end_row .and. &
+             this%selection_start_col <= this%selection_end_col)) then
+            start_row = this%selection_start_row
+            start_col = this%selection_start_col
+            end_row = this%selection_end_row
+            end_col = this%selection_end_col
+        else
+            start_row = this%selection_end_row
+            start_col = this%selection_end_col
+            end_row = this%selection_start_row
+            end_col = this%selection_start_col
+        end if
+
+        ! Convert to linear position for easy comparison
+        cell_pos = (row - 1) * this%cols + col
+        start_pos = (start_row - 1) * this%cols + start_col
+        end_pos = (end_row - 1) * this%cols + end_col
+
+        selected = (cell_pos >= start_pos .and. cell_pos <= end_pos)
+    end function grid_is_cell_selected
 
 end module terminal_grid
