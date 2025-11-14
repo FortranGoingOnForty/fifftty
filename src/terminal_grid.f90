@@ -73,6 +73,8 @@ module terminal_grid
         procedure :: get_history_line => grid_get_history_line
         procedure :: insert_chars => grid_insert_chars
         procedure :: delete_chars => grid_delete_chars
+        procedure :: insert_lines => grid_insert_lines
+        procedure :: delete_lines => grid_delete_lines
     end type grid_t
 
 contains
@@ -364,5 +366,49 @@ contains
             this%cells(i, row)%attributes = 0
         end do
     end subroutine grid_delete_chars
+
+    ! Insert n blank lines at cursor position (IL - Insert Line)
+    ! Lines from cursor row down shift down, bottom lines are lost
+    subroutine grid_insert_lines(this, count)
+        class(grid_t), intent(inout) :: this
+        integer, intent(in) :: count
+        integer :: i, n, start_row
+
+        start_row = this%cursor_row
+        n = min(count, this%rows - start_row + 1)  ! Don't insert more than will fit
+
+        ! Shift lines down from bottom to cursor position
+        do i = this%rows, start_row + n, -1
+            if (i - n >= start_row) then
+                this%cells(:, i) = this%cells(:, i - n)
+            end if
+        end do
+
+        ! Fill inserted lines with blanks
+        do i = start_row, min(start_row + n - 1, this%rows)
+            call this%clear_line(i)
+        end do
+    end subroutine grid_insert_lines
+
+    ! Delete n lines at cursor position (DL - Delete Line)
+    ! Lines below cursor shift up, blank lines fill bottom
+    subroutine grid_delete_lines(this, count)
+        class(grid_t), intent(inout) :: this
+        integer, intent(in) :: count
+        integer :: i, n, start_row
+
+        start_row = this%cursor_row
+        n = min(count, this%rows - start_row + 1)  ! Don't delete more than available
+
+        ! Shift lines up
+        do i = start_row, this%rows - n
+            this%cells(:, i) = this%cells(:, i + n)
+        end do
+
+        ! Fill bottom with blank lines
+        do i = this%rows - n + 1, this%rows
+            call this%clear_line(i)
+        end do
+    end subroutine grid_delete_lines
 
 end module terminal_grid

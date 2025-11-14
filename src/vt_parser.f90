@@ -663,12 +663,18 @@ contains
         case ('L')  ! IL - Insert Line
             n = 1
             if (parser%num_params >= 1) n = max(1, parser%params(1))
-            ! TODO: Implement line insertion
+            call grid%insert_lines(n)
+            if (DEBUG_SEQUENCES) then
+                print '(A,I0)', "INSERT LINES: ", n
+            end if
 
         case ('M')  ! DL - Delete Line
             n = 1
             if (parser%num_params >= 1) n = max(1, parser%params(1))
-            ! TODO: Implement line deletion
+            call grid%delete_lines(n)
+            if (DEBUG_SEQUENCES) then
+                print '(A,I0)', "DELETE LINES: ", n
+            end if
 
         case ('X')  ! ECH - Erase Character
             n = 1
