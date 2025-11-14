@@ -39,6 +39,7 @@ module terminal_grid
         integer :: fg_color       ! Foreground color index
         integer :: bg_color       ! Background color index
         integer :: attributes     ! Bitfield of ATTR_* flags
+        integer :: hyperlink_id   ! Hyperlink ID (0 = no link)
     end type cell_t
 
     ! Terminal grid - the main buffer
@@ -150,6 +151,7 @@ contains
                 this%cells(i, j)%fg_color = COLOR_DEFAULT
                 this%cells(i, j)%bg_color = COLOR_DEFAULT
                 this%cells(i, j)%attributes = 0
+                this%cells(i, j)%hyperlink_id = 0
             end do
         end do
 
@@ -172,14 +174,15 @@ contains
             this%cells(i, row)%fg_color = COLOR_DEFAULT
             this%cells(i, row)%bg_color = COLOR_DEFAULT
             this%cells(i, row)%attributes = 0
+            this%cells(i, row)%hyperlink_id = 0
         end do
     end subroutine grid_clear_line
 
     ! Set a cell at given position
-    subroutine grid_set_cell(this, row, col, codepoint, fg, bg, attrs)
+    subroutine grid_set_cell(this, row, col, codepoint, fg, bg, attrs, hyperlink)
         class(grid_t), intent(inout) :: this
         integer, intent(in) :: row, col, codepoint
-        integer, intent(in), optional :: fg, bg, attrs
+        integer, intent(in), optional :: fg, bg, attrs, hyperlink
 
         if (row < 1 .or. row > this%rows) return
         if (col < 1 .or. col > this%cols) return
@@ -189,11 +192,13 @@ contains
             if (present(fg)) this%alt_cells(col, row)%fg_color = fg
             if (present(bg)) this%alt_cells(col, row)%bg_color = bg
             if (present(attrs)) this%alt_cells(col, row)%attributes = attrs
+            if (present(hyperlink)) this%alt_cells(col, row)%hyperlink_id = hyperlink
         else
             this%cells(col, row)%codepoint = codepoint
             if (present(fg)) this%cells(col, row)%fg_color = fg
             if (present(bg)) this%cells(col, row)%bg_color = bg
             if (present(attrs)) this%cells(col, row)%attributes = attrs
+            if (present(hyperlink)) this%cells(col, row)%hyperlink_id = hyperlink
         end if
     end subroutine grid_set_cell
 
@@ -209,6 +214,7 @@ contains
             cell%fg_color = COLOR_DEFAULT
             cell%bg_color = COLOR_DEFAULT
             cell%attributes = 0
+            cell%hyperlink_id = 0
             return
         end if
 
@@ -386,6 +392,7 @@ contains
             this%cells(i, row)%fg_color = COLOR_DEFAULT
             this%cells(i, row)%bg_color = COLOR_DEFAULT
             this%cells(i, row)%attributes = 0
+            this%cells(i, row)%hyperlink_id = 0
         end do
     end subroutine grid_insert_chars
 
@@ -411,6 +418,7 @@ contains
             this%cells(i, row)%fg_color = COLOR_DEFAULT
             this%cells(i, row)%bg_color = COLOR_DEFAULT
             this%cells(i, row)%attributes = 0
+            this%cells(i, row)%hyperlink_id = 0
         end do
     end subroutine grid_delete_chars
 
@@ -528,6 +536,7 @@ contains
                 buffer(i, j)%fg_color = COLOR_DEFAULT
                 buffer(i, j)%bg_color = COLOR_DEFAULT
                 buffer(i, j)%attributes = 0
+                buffer(i, j)%hyperlink_id = 0
             end do
         end do
     end subroutine clear_buffer

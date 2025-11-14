@@ -52,6 +52,8 @@ module vt_parser
         integer :: osc_buffer_len = 0
         ! Window title from OSC sequences
         character(len=256) :: window_title = "fortty"
+        ! Hyperlink support (OSC 8)
+        integer :: current_hyperlink_id = 0  ! Current hyperlink ID (0 = no link)
     contains
         procedure :: reset => parser_reset
         procedure :: process_byte => parser_process_byte
@@ -373,6 +375,25 @@ contains
                             parser%window_title = osc_str(semicolon_pos+1:)
                             if (DEBUG_SEQUENCES) then
                                 print '(A,A)', "OSC TITLE: ", trim(parser%window_title)
+                            end if
+                        end if
+                    else if (ios == 0 .and. osc_num == 8) then
+                        ! OSC 8 - Hyperlink: ESC ] 8 ; [params] ; [URL] ST
+                        ! Find second semicolon (URL starts after it)
+                        if (semicolon_pos < parser%osc_buffer_len) then
+                            osc_str = osc_str(semicolon_pos+1:)  ! Skip "8;"
+                            semicolon_pos = index(osc_str, ';')
+                            if (semicolon_pos > 0) then
+                                if (semicolon_pos < len(osc_str)) then
+                                    ! URL present - assign hyperlink ID
+                                    parser%current_hyperlink_id = 1  ! Simplified: just use 1 for any link
+                                    if (DEBUG_SEQUENCES) then
+                                        print '(A,A)', "OSC 8 HYPERLINK: ", trim(osc_str(semicolon_pos+1:))
+                                    end if
+                                else
+                                    ! Empty URL - clear hyperlink
+                                    parser%current_hyperlink_id = 0
+                                end if
                             end if
                         end if
                     end if
@@ -1077,12 +1098,14 @@ contains
 
         ! Write character at cursor position
         call grid%set_cell(grid%cursor_row, grid%cursor_col, codepoint, &
-                          parser%current_fg, parser%current_bg, parser%current_attrs)
+                          parser%current_fg, parser%current_bg, parser%current_attrs, &
+                          parser%current_hyperlink_id)
 
         ! For double-width characters, mark the next cell as a continuation (codepoint 0)
         if (char_width == 2 .and. grid%cursor_col < grid%cols) then
             call grid%set_cell(grid%cursor_row, grid%cursor_col + 1, 0, &
-                              parser%current_fg, parser%current_bg, parser%current_attrs)
+                              parser%current_fg, parser%current_bg, parser%current_attrs, &
+                              parser%current_hyperlink_id)
             if (DEBUG_SEQUENCES) then
                 print '(A,I0,A)', "DEBUG: Marked col ", grid%cursor_col + 1, " as wide char continuation"
             end if
