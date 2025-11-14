@@ -50,6 +50,12 @@ module terminal_grid
         logical :: cursor_visible ! Cursor visibility
         logical :: pending_wrap   ! True if cursor is at rightmost column and next char will wrap
         type(cell_t), allocatable :: cells(:,:)  ! Grid buffer (col, row)
+        ! Scrollback history
+        type(cell_t), allocatable :: history(:,:)  ! History buffer (col, line)
+        integer :: history_size = 10000            ! Maximum history lines
+        integer :: history_start = 1               ! Index of oldest line (circular buffer)
+        integer :: history_count = 0               ! Number of lines in history
+        integer :: scroll_offset = 0               ! How far back we're viewing (0 = current)
     contains
         procedure :: init => grid_init
         procedure :: destroy => grid_destroy
@@ -60,6 +66,11 @@ module terminal_grid
         procedure :: scroll_up => grid_scroll_up
         procedure :: resize => grid_resize
         procedure :: move_cursor => grid_move_cursor
+        procedure :: scroll_back => grid_scroll_back
+        procedure :: scroll_forward => grid_scroll_forward
+        procedure :: scroll_to_top => grid_scroll_to_top
+        procedure :: scroll_to_bottom => grid_scroll_to_bottom
+        procedure :: get_history_line => grid_get_history_line
     end type grid_t
 
 contains
@@ -78,12 +89,19 @@ contains
 
         allocate(this%cells(cols, rows))
         call this%clear()
+
+        ! Allocate scrollback history buffer
+        allocate(this%history(cols, this%history_size))
+        this%history_start = 1
+        this%history_count = 0
+        this%scroll_offset = 0
     end subroutine grid_init
 
     ! Destroy grid and free memory
     subroutine grid_destroy(this)
         class(grid_t), intent(inout) :: this
         if (allocated(this%cells)) deallocate(this%cells)
+        if (allocated(this%history)) deallocate(this%history)
     end subroutine grid_destroy
 
     ! Clear entire grid
@@ -158,7 +176,21 @@ contains
     ! Scroll the grid up by one line (insert blank line at bottom)
     subroutine grid_scroll_up(this)
         class(grid_t), intent(inout) :: this
-        integer :: row
+        integer :: row, history_idx
+
+        ! Save top line to history before scrolling
+        if (this%history_count < this%history_size) then
+            ! History not full yet, add to end
+            history_idx = this%history_count + 1
+            this%history(:, history_idx) = this%cells(:, 1)
+            this%history_count = this%history_count + 1
+        else
+            ! History full, use circular buffer (overwrite oldest)
+            history_idx = this%history_start
+            this%history(:, history_idx) = this%cells(:, 1)
+            ! Move start pointer forward (circular)
+            this%history_start = mod(this%history_start, this%history_size) + 1
+        end if
 
         ! Shift all rows up
         do row = 1, this%rows - 1
@@ -167,6 +199,9 @@ contains
 
         ! Clear bottom row
         call this%clear_line(this%rows)
+
+        ! Reset scroll offset when new content arrives
+        this%scroll_offset = 0
     end subroutine grid_scroll_up
 
     ! Resize grid (creates new buffer, copies old content)
@@ -223,5 +258,57 @@ contains
         this%cursor_col = max(1, min(col, this%cols))
         this%pending_wrap = .false.  ! Clear pending wrap on explicit cursor movement
     end subroutine grid_move_cursor
+
+    ! Scroll back in history (increase scroll offset)
+    subroutine grid_scroll_back(this, lines)
+        class(grid_t), intent(inout) :: this
+        integer, intent(in) :: lines
+
+        this%scroll_offset = min(this%scroll_offset + lines, this%history_count)
+    end subroutine grid_scroll_back
+
+    ! Scroll forward towards current (decrease scroll offset)
+    subroutine grid_scroll_forward(this, lines)
+        class(grid_t), intent(inout) :: this
+        integer, intent(in) :: lines
+
+        this%scroll_offset = max(this%scroll_offset - lines, 0)
+    end subroutine grid_scroll_forward
+
+    ! Scroll to top of history
+    subroutine grid_scroll_to_top(this)
+        class(grid_t), intent(inout) :: this
+
+        this%scroll_offset = this%history_count
+    end subroutine grid_scroll_to_top
+
+    ! Scroll to bottom (current view)
+    subroutine grid_scroll_to_bottom(this)
+        class(grid_t), intent(inout) :: this
+
+        this%scroll_offset = 0
+    end subroutine grid_scroll_to_bottom
+
+    ! Get a line from history (returns cells for that line)
+    ! line_num is relative to current view: 1 = oldest visible, history_count = newest in history
+    function grid_get_history_line(this, line_num) result(line)
+        class(grid_t), intent(in) :: this
+        integer, intent(in) :: line_num
+        type(cell_t), allocatable :: line(:)
+        integer :: history_idx
+
+        allocate(line(this%cols))
+
+        ! Calculate actual index in circular buffer
+        if (this%history_count < this%history_size) then
+            ! History not full, simple indexing
+            history_idx = line_num
+        else
+            ! History full, use circular indexing
+            history_idx = mod(this%history_start + line_num - 2, this%history_size) + 1
+        end if
+
+        line = this%history(:, history_idx)
+    end function grid_get_history_line
 
 end module terminal_grid
