@@ -647,14 +647,18 @@ contains
         case ('P')  ! DCH - Delete Character
             n = 1
             if (parser%num_params >= 1) n = max(1, parser%params(1))
-            ! For now, just shift characters left
-            ! TODO: Implement proper character deletion
+            call grid%delete_chars(n)
+            if (DEBUG_SEQUENCES) then
+                print '(A,I0)', "DELETE CHARS: ", n
+            end if
 
         case ('@')  ! ICH - Insert Character
             n = 1
             if (parser%num_params >= 1) n = max(1, parser%params(1))
-            ! For now, just make space
-            ! TODO: Implement proper character insertion
+            call grid%insert_chars(n)
+            if (DEBUG_SEQUENCES) then
+                print '(A,I0)', "INSERT CHARS: ", n
+            end if
 
         case ('L')  ! IL - Insert Line
             n = 1

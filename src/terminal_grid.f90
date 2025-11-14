@@ -71,6 +71,8 @@ module terminal_grid
         procedure :: scroll_to_top => grid_scroll_to_top
         procedure :: scroll_to_bottom => grid_scroll_to_bottom
         procedure :: get_history_line => grid_get_history_line
+        procedure :: insert_chars => grid_insert_chars
+        procedure :: delete_chars => grid_delete_chars
     end type grid_t
 
 contains
@@ -310,5 +312,57 @@ contains
 
         line = this%history(:, history_idx)
     end function grid_get_history_line
+
+    ! Insert n blank characters at cursor position (ICH - Insert Character)
+    ! Characters from cursor to right edge shift right, rightmost chars are lost
+    subroutine grid_insert_chars(this, count)
+        class(grid_t), intent(inout) :: this
+        integer, intent(in) :: count
+        integer :: i, n, row, start_col
+
+        row = this%cursor_row
+        start_col = this%cursor_col
+        n = min(count, this%cols - start_col + 1)  ! Don't insert more than will fit
+
+        ! Shift characters right from end to cursor position
+        do i = this%cols, start_col + n, -1
+            if (i - n >= start_col) then
+                this%cells(i, row) = this%cells(i - n, row)
+            end if
+        end do
+
+        ! Fill inserted positions with blanks
+        do i = start_col, min(start_col + n - 1, this%cols)
+            this%cells(i, row)%codepoint = 32
+            this%cells(i, row)%fg_color = COLOR_DEFAULT
+            this%cells(i, row)%bg_color = COLOR_DEFAULT
+            this%cells(i, row)%attributes = 0
+        end do
+    end subroutine grid_insert_chars
+
+    ! Delete n characters at cursor position (DCH - Delete Character)
+    ! Characters to the right of deleted area shift left, blanks fill right edge
+    subroutine grid_delete_chars(this, count)
+        class(grid_t), intent(inout) :: this
+        integer, intent(in) :: count
+        integer :: i, n, row, start_col
+
+        row = this%cursor_row
+        start_col = this%cursor_col
+        n = min(count, this%cols - start_col + 1)  ! Don't delete more than available
+
+        ! Shift characters left
+        do i = start_col, this%cols - n
+            this%cells(i, row) = this%cells(i + n, row)
+        end do
+
+        ! Fill right edge with blanks
+        do i = this%cols - n + 1, this%cols
+            this%cells(i, row)%codepoint = 32
+            this%cells(i, row)%fg_color = COLOR_DEFAULT
+            this%cells(i, row)%bg_color = COLOR_DEFAULT
+            this%cells(i, row)%attributes = 0
+        end do
+    end subroutine grid_delete_chars
 
 end module terminal_grid
