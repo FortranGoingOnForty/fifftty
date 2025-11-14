@@ -308,10 +308,36 @@ contains
         character(len=16) :: key_string
         integer :: bytes_written, key_len
         integer, parameter :: GDK_CONTROL_MASK = 4  ! Ctrl modifier
+        integer, parameter :: GDK_SHIFT_MASK = 1    ! Shift modifier
 
         handled = 0  ! FALSE by default
 
         if (.not. initialized) return
+
+        ! Handle scrollback navigation with Shift modifier
+        if (iand(state, GDK_SHIFT_MASK) /= 0) then
+            if (keyval == 65365) then  ! Shift+Page_Up
+                call global_grid%scroll_back(global_grid%rows)
+                call gtk_gl_area_queue_render(global_gl_area)
+                handled = 1
+                return
+            else if (keyval == 65366) then  ! Shift+Page_Down
+                call global_grid%scroll_forward(global_grid%rows)
+                call gtk_gl_area_queue_render(global_gl_area)
+                handled = 1
+                return
+            else if (keyval == 65360) then  ! Shift+Home
+                call global_grid%scroll_to_top()
+                call gtk_gl_area_queue_render(global_gl_area)
+                handled = 1
+                return
+            else if (keyval == 65367) then  ! Shift+End
+                call global_grid%scroll_to_bottom()
+                call gtk_gl_area_queue_render(global_gl_area)
+                handled = 1
+                return
+            end if
+        end if
 
         ! Check for Ctrl+letter combinations (Ctrl+A through Ctrl+Z)
         ! GTK sends lowercase letters with Ctrl modifier

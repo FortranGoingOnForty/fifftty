@@ -534,7 +534,9 @@ contains
         integer :: row, col
         integer :: start_col, end_col
         integer :: underline_color, underline_attrs
+        integer :: history_line, grid_row
         type(cell_t) :: cell
+        type(cell_t), allocatable :: history_cells(:)
         real(GLfloat), target :: projection(16)
 
         ! Clear screen to black (terminal background)
@@ -560,7 +562,40 @@ contains
         call glBindTexture(GL_TEXTURE_2D, this%font_mgr%atlas_texture)
         do row = 1, grid%rows
             do col = 1, grid%cols
-                cell = grid%cells(col, row)  ! cells(col, row) not cells(row, col)
+                ! Get cell from either history or current grid depending on scroll offset
+                if (grid%scroll_offset > 0) then
+                    ! Scrolled back - need to show history
+                    if (row <= grid%scroll_offset) then
+                        ! This row should show history
+                        ! Calculate which history line (counting from newest)
+                        history_line = grid%history_count - grid%scroll_offset + row
+                        if (history_line >= 1 .and. history_line <= grid%history_count) then
+                            history_cells = grid%get_history_line(history_line)
+                            cell = history_cells(col)
+                            deallocate(history_cells)
+                        else
+                            ! Out of history bounds, use empty cell
+                            cell%codepoint = 32
+                            cell%fg_color = COLOR_DEFAULT
+                            cell%bg_color = COLOR_DEFAULT
+                            cell%attributes = 0
+                        end if
+                    else
+                        ! Show current grid starting from top
+                        grid_row = row - grid%scroll_offset
+                        if (grid_row >= 1 .and. grid_row <= grid%rows) then
+                            cell = grid%cells(col, grid_row)
+                        else
+                            cell%codepoint = 32
+                            cell%fg_color = COLOR_DEFAULT
+                            cell%bg_color = COLOR_DEFAULT
+                            cell%attributes = 0
+                        end if
+                    end if
+                else
+                    ! Not scrolled - show current grid normally
+                    cell = grid%cells(col, row)
+                end if
 
                 ! Skip empty cells and spaces
                 if (cell%codepoint > 0 .and. cell%codepoint /= 32) then
@@ -574,7 +609,28 @@ contains
         do row = 1, grid%rows
             col = 1
             do while (col <= grid%cols)
-                cell = grid%cells(col, row)
+                ! Get cell with scrollback support (same logic as first pass)
+                if (grid%scroll_offset > 0) then
+                    if (row <= grid%scroll_offset) then
+                        history_line = grid%history_count - grid%scroll_offset + row
+                        if (history_line >= 1 .and. history_line <= grid%history_count) then
+                            history_cells = grid%get_history_line(history_line)
+                            cell = history_cells(col)
+                            deallocate(history_cells)
+                        else
+                            cell%attributes = 0
+                        end if
+                    else
+                        grid_row = row - grid%scroll_offset
+                        if (grid_row >= 1 .and. grid_row <= grid%rows) then
+                            cell = grid%cells(col, grid_row)
+                        else
+                            cell%attributes = 0
+                        end if
+                    end if
+                else
+                    cell = grid%cells(col, row)
+                end if
 
                 ! Check if this cell starts an underlined sequence
                 if (iand(cell%attributes, ATTR_UNDERLINE) /= 0) then
@@ -585,7 +641,28 @@ contains
 
                     ! Continue while cells have underline attribute
                     do while (col <= grid%cols)
-                        cell = grid%cells(col, row)
+                        ! Get cell with scrollback support
+                        if (grid%scroll_offset > 0) then
+                            if (row <= grid%scroll_offset) then
+                                history_line = grid%history_count - grid%scroll_offset + row
+                                if (history_line >= 1 .and. history_line <= grid%history_count) then
+                                    history_cells = grid%get_history_line(history_line)
+                                    cell = history_cells(col)
+                                    deallocate(history_cells)
+                                else
+                                    cell%attributes = 0
+                                end if
+                            else
+                                grid_row = row - grid%scroll_offset
+                                if (grid_row >= 1 .and. grid_row <= grid%rows) then
+                                    cell = grid%cells(col, grid_row)
+                                else
+                                    cell%attributes = 0
+                                end if
+                            end if
+                        else
+                            cell = grid%cells(col, row)
+                        end if
                         if (iand(cell%attributes, ATTR_UNDERLINE) == 0) exit
                         end_col = col
                         col = col + 1
@@ -599,8 +676,8 @@ contains
             end do
         end do
 
-        ! Draw cursor if visible
-        if (grid%cursor_visible) then
+        ! Draw cursor if visible (but only when not scrolled back in history)
+        if (grid%cursor_visible .and. grid%scroll_offset == 0) then
             call draw_cursor(this, grid%cursor_row, grid%cursor_col)
         end if
 
