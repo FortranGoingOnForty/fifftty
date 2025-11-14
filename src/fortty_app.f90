@@ -21,6 +21,9 @@ module fortty_app
     integer, save :: pending_height = 0
     character(len=256), save :: last_window_title = "fortty"
     logical, save :: mouse_button_pressed = .false.
+    integer, save :: current_font_size = 16
+    integer, save :: default_font_size = 16
+    character(len=256), save :: current_font_path = ""
 
 contains
 
@@ -155,10 +158,11 @@ contains
 
         ! Find a system font (monospace)
         call find_system_font(font_path)
+        current_font_path = font_path
 
         ! Initialize renderer with LOGICAL dimensions (GTK handles HiDPI scaling)
         print '(A)', "DEBUG: Using LOGICAL size for renderer (GTK auto-scales framebuffer)"
-        if (.not. global_renderer%init(trim(font_path), 16, width, height)) then
+        if (.not. global_renderer%init(trim(font_path), current_font_size, width, height)) then
             print *, "Error: Failed to initialize renderer"
             return
         end if
@@ -346,6 +350,23 @@ contains
         if (iand(state, GDK_CONTROL_MASK) /= 0 .and. iand(state, GDK_SHIFT_MASK) /= 0) then
             if (keyval == ichar('C') .or. keyval == ichar('c')) then
                 call copy_selection_to_clipboard()
+                handled = 1
+                return
+            end if
+        end if
+
+        ! Font size adjustments (Ctrl+Plus, Ctrl+Minus, Ctrl+0)
+        if (iand(state, GDK_CONTROL_MASK) /= 0) then
+            if (keyval == 43 .or. keyval == 61) then  ! Plus or Equal (Ctrl+=)
+                call change_font_size(current_font_size + 2)
+                handled = 1
+                return
+            else if (keyval == 45) then  ! Minus (Ctrl+-)
+                call change_font_size(current_font_size - 2)
+                handled = 1
+                return
+            else if (keyval == 48) then  ! 0 (Ctrl+0 - reset)
+                call change_font_size(default_font_size)
                 handled = 1
                 return
             end if
@@ -673,5 +694,65 @@ contains
         call global_grid%clear_selection()
         call gtk_gl_area_queue_render(global_gl_area)
     end subroutine copy_selection_to_clipboard
+
+    ! Change font size dynamically
+    subroutine change_font_size(new_size)
+        integer, intent(in) :: new_size
+        integer :: clamped_size, new_grid_cols, new_grid_rows
+        integer(c_int) :: scale_factor, logical_width, logical_height
+        integer :: physical_width, physical_height
+
+        if (.not. initialized) return
+
+        ! Clamp font size to reasonable range
+        clamped_size = new_size
+        if (clamped_size < 8) clamped_size = 8
+        if (clamped_size > 48) clamped_size = 48
+
+        ! Skip if no change
+        if (clamped_size == current_font_size) return
+
+        current_font_size = clamped_size
+
+        ! Make GL context current
+        call gtk_gl_area_make_current(global_gl_area)
+
+        ! Get current window size
+        logical_width = gtk_widget_get_allocated_width(global_gl_area)
+        logical_height = gtk_widget_get_allocated_height(global_gl_area)
+
+        ! Get scale factor
+        call query_monitor_scale_factor(global_gl_area, scale_factor)
+        physical_width = logical_width * scale_factor
+        physical_height = logical_height * scale_factor
+
+        ! Destroy old font manager and reinitialize with new size
+        call global_renderer%destroy()
+        if (.not. global_renderer%init(trim(current_font_path), current_font_size, &
+                                       logical_width, logical_height)) then
+            print *, "Error: Failed to reinitialize renderer with new font size"
+            return
+        end if
+
+        ! Calculate new grid dimensions
+        new_grid_cols = physical_width / global_renderer%cell_width
+        new_grid_rows = physical_height / global_renderer%cell_height
+
+        ! Ensure minimum grid size
+        if (new_grid_cols < 10) new_grid_cols = 10
+        if (new_grid_rows < 5) new_grid_rows = 5
+
+        print '(A,I0,A,I0,A,I0)', "DEBUG: Font size changed to ", current_font_size, &
+            " -> grid ", new_grid_cols, "x", new_grid_rows
+
+        ! Resize the grid (preserves content)
+        call global_grid%resize(new_grid_rows, new_grid_cols)
+
+        ! Update PTY window size (sends SIGWINCH to shell)
+        call global_pty%resize(new_grid_rows, new_grid_cols)
+
+        ! Request redraw
+        call gtk_gl_area_queue_render(global_gl_area)
+    end subroutine change_font_size
 
 end module fortty_app
