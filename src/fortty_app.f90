@@ -14,10 +14,12 @@ module fortty_app
     type(parser_t), save :: global_parser
     type(renderer_t), save :: global_renderer
     type(c_ptr), save :: global_gl_area = c_null_ptr
+    type(c_ptr), save :: global_window = c_null_ptr
     logical, save :: initialized = .false.
     logical, save :: mapped = .false.
     integer, save :: pending_width = 0
     integer, save :: pending_height = 0
+    character(len=256), save :: last_window_title = "fortty"
 
 contains
 
@@ -410,6 +412,13 @@ contains
         if (bytes_read > 0) then
             ! Process data through VT parser
             call global_parser%process_buffer(global_grid, buffer, bytes_read)
+
+            ! Update window title if changed
+            if (global_parser%window_title /= last_window_title .and. c_associated(global_window)) then
+                call gtk_window_set_title(global_window, trim(global_parser%window_title) // c_null_char)
+                last_window_title = global_parser%window_title
+            end if
+
             ! Request GL render for GtkGLArea (more direct than queue_draw)
             call gtk_gl_area_queue_render(global_gl_area)
         end if
@@ -503,5 +512,11 @@ contains
         ! No font found - use first as fallback
         font_path = font_candidates(1)
     end subroutine find_system_font
+
+    ! Set global window pointer for title updates
+    subroutine set_window(window)
+        type(c_ptr), intent(in) :: window
+        global_window = window
+    end subroutine set_window
 
 end module fortty_app

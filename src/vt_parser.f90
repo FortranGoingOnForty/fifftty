@@ -41,6 +41,11 @@ module vt_parser
         ! DEC private mode states
         logical :: application_cursor_keys = .false.  ! ?1 - DECCKM
         logical :: bracketed_paste_mode = .false.     ! ?2004
+        ! OSC string buffer
+        character(len=1024) :: osc_buffer = ""
+        integer :: osc_buffer_len = 0
+        ! Window title from OSC sequences
+        character(len=256) :: window_title = "fortty"
     contains
         procedure :: reset => parser_reset
         procedure :: process_byte => parser_process_byte
@@ -286,6 +291,8 @@ contains
             if (DEBUG_SEQUENCES) then
                 print '(A)', "DEBUG OSC: === ENTERING OSC STATE ==="
             end if
+            parser%osc_buffer = ""
+            parser%osc_buffer_len = 0
             parser%state = STATE_OSC_STRING
         else if (byte == 80) then  ! 'P' - DCS (Device Control String)
             if (DEBUG_SEQUENCES) then
@@ -337,28 +344,46 @@ contains
         type(parser_t), intent(inout) :: parser
         type(grid_t), intent(inout) :: grid
         integer, intent(in) :: byte
+        integer :: semicolon_pos, osc_num, ios
+        character(len=:), allocatable :: osc_str
 
         ! Check for terminator
-        if (byte == 7) then  ! BEL - terminate OSC
-            if (DEBUG_SEQUENCES) then
-                print '(A)', "DEBUG OSC: Terminated by BEL, returning to GROUND"
-            end if
-            parser%state = STATE_GROUND
-        else if (byte == 27) then  ! ESC - might be ESC \ terminator
-            if (DEBUG_SEQUENCES) then
-                print '(A)', "DEBUG OSC: Saw ESC, transitioning to ESCAPE state (expecting backslash)"
-            end if
-            ! For simplicity, treat ESC as terminator and return to ESCAPE state
-            ! This handles ESC \ (next byte will be \) and other ESC sequences
-            parser%state = STATE_ESCAPE
-        else
-            ! All other bytes are consumed and ignored (Phase 1: no OSC handling)
-            if (DEBUG_SEQUENCES) then
-                if (byte >= 32 .and. byte <= 126) then
-                    print '(A,I0,A,A,A)', "DEBUG OSC: Consuming byte ", byte, " ('", char(byte), "')"
-                else
-                    print '(A,I0,A,Z2.2,A)', "DEBUG OSC: Consuming byte ", byte, " (0x", byte, ")"
+        if (byte == 7 .or. byte == 27) then  ! BEL or ESC
+            ! Process the collected OSC string
+            if (parser%osc_buffer_len > 0) then
+                osc_str = parser%osc_buffer(1:parser%osc_buffer_len)
+
+                ! Find semicolon separator
+                semicolon_pos = index(osc_str, ';')
+
+                if (semicolon_pos > 0) then
+                    ! Parse OSC number
+                    read(osc_str(1:semicolon_pos-1), *, iostat=ios) osc_num
+
+                    ! Handle window title sequences (if read succeeded)
+                    if (ios == 0 .and. (osc_num == 0 .or. osc_num == 2)) then
+                        ! OSC 0 or 2 - Set window title
+                        if (semicolon_pos < parser%osc_buffer_len) then
+                            parser%window_title = osc_str(semicolon_pos+1:)
+                            if (DEBUG_SEQUENCES) then
+                                print '(A,A)', "OSC TITLE: ", trim(parser%window_title)
+                            end if
+                        end if
+                    end if
                 end if
+            end if
+
+            ! Return to appropriate state
+            if (byte == 7) then
+                parser%state = STATE_GROUND
+            else
+                parser%state = STATE_ESCAPE
+            end if
+        else
+            ! Collect byte into buffer (if room)
+            if (parser%osc_buffer_len < len(parser%osc_buffer)) then
+                parser%osc_buffer_len = parser%osc_buffer_len + 1
+                parser%osc_buffer(parser%osc_buffer_len:parser%osc_buffer_len) = char(byte)
             end if
         end if
     end subroutine handle_osc_string

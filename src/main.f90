@@ -61,6 +61,9 @@ contains
             return
         end if
 
+        ! Save window pointer for title updates
+        call set_window(window)
+
         call gtk_window_set_title(window, f_c_string("fortty - Terminal Emulator"))
         call gtk_window_set_default_size(window, 800_c_int, 600_c_int)
 
