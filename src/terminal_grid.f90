@@ -59,6 +59,11 @@ module terminal_grid
         ! Scrolling region (DECSTBM)
         integer :: scroll_top = 1                  ! Top margin (1-indexed)
         integer :: scroll_bottom = 0               ! Bottom margin (0 = use rows)
+        ! Alternate screen buffer
+        type(cell_t), allocatable :: alt_cells(:,:)  ! Alternate screen buffer
+        logical :: use_alt_screen = .false.          ! True if alternate screen is active
+        integer :: saved_cursor_row = 1              ! Saved cursor position
+        integer :: saved_cursor_col = 1
     contains
         procedure :: init => grid_init
         procedure :: destroy => grid_destroy
@@ -79,6 +84,8 @@ module terminal_grid
         procedure :: insert_lines => grid_insert_lines
         procedure :: delete_lines => grid_delete_lines
         procedure :: set_scroll_region => grid_set_scroll_region
+        procedure :: switch_to_alt_screen => grid_switch_to_alt_screen
+        procedure :: switch_to_main_screen => grid_switch_to_main_screen
     end type grid_t
 
 contains
@@ -98,6 +105,10 @@ contains
         allocate(this%cells(cols, rows))
         call this%clear()
 
+        ! Allocate alternate screen buffer
+        allocate(this%alt_cells(cols, rows))
+        this%use_alt_screen = .false.
+
         ! Allocate scrollback history buffer
         allocate(this%history(cols, this%history_size))
         this%history_start = 1
@@ -113,6 +124,7 @@ contains
     subroutine grid_destroy(this)
         class(grid_t), intent(inout) :: this
         if (allocated(this%cells)) deallocate(this%cells)
+        if (allocated(this%alt_cells)) deallocate(this%alt_cells)
         if (allocated(this%history)) deallocate(this%history)
     end subroutine grid_destroy
 
@@ -161,10 +173,17 @@ contains
         if (row < 1 .or. row > this%rows) return
         if (col < 1 .or. col > this%cols) return
 
-        this%cells(col, row)%codepoint = codepoint
-        if (present(fg)) this%cells(col, row)%fg_color = fg
-        if (present(bg)) this%cells(col, row)%bg_color = bg
-        if (present(attrs)) this%cells(col, row)%attributes = attrs
+        if (this%use_alt_screen) then
+            this%alt_cells(col, row)%codepoint = codepoint
+            if (present(fg)) this%alt_cells(col, row)%fg_color = fg
+            if (present(bg)) this%alt_cells(col, row)%bg_color = bg
+            if (present(attrs)) this%alt_cells(col, row)%attributes = attrs
+        else
+            this%cells(col, row)%codepoint = codepoint
+            if (present(fg)) this%cells(col, row)%fg_color = fg
+            if (present(bg)) this%cells(col, row)%bg_color = bg
+            if (present(attrs)) this%cells(col, row)%attributes = attrs
+        end if
     end subroutine grid_set_cell
 
     ! Get a cell at given position
@@ -182,7 +201,11 @@ contains
             return
         end if
 
-        cell = this%cells(col, row)
+        if (this%use_alt_screen) then
+            cell = this%alt_cells(col, row)
+        else
+            cell = this%cells(col, row)
+        end if
     end function grid_get_cell
 
     ! Scroll the grid up by one line (insert blank line at bottom of scroll region)
@@ -443,5 +466,59 @@ contains
             this%scroll_bottom = this%rows
         end if
     end subroutine grid_set_scroll_region
+
+    ! Switch to alternate screen buffer (ESC[?1049h)
+    ! Saves cursor position, clears alt screen, switches to it
+    subroutine grid_switch_to_alt_screen(this)
+        class(grid_t), intent(inout) :: this
+
+        if (this%use_alt_screen) return  ! Already on alt screen
+
+        ! Save cursor position
+        this%saved_cursor_row = this%cursor_row
+        this%saved_cursor_col = this%cursor_col
+
+        ! Switch to alternate screen
+        this%use_alt_screen = .true.
+
+        ! Clear alternate screen
+        this%alt_cells = this%cells  ! Copy current state first (optional)
+        call clear_buffer(this%alt_cells, this%cols, this%rows)
+
+        ! Move cursor to home
+        this%cursor_row = 1
+        this%cursor_col = 1
+    end subroutine grid_switch_to_alt_screen
+
+    ! Switch back to main screen buffer (ESC[?1049l)
+    ! Restores cursor position, switches back to main screen
+    subroutine grid_switch_to_main_screen(this)
+        class(grid_t), intent(inout) :: this
+
+        if (.not. this%use_alt_screen) return  ! Already on main screen
+
+        ! Switch back to main screen
+        this%use_alt_screen = .false.
+
+        ! Restore cursor position
+        this%cursor_row = this%saved_cursor_row
+        this%cursor_col = this%saved_cursor_col
+    end subroutine grid_switch_to_main_screen
+
+    ! Helper to clear a buffer
+    subroutine clear_buffer(buffer, cols, rows)
+        type(cell_t), intent(inout) :: buffer(:,:)
+        integer, intent(in) :: cols, rows
+        integer :: i, j
+
+        do j = 1, rows
+            do i = 1, cols
+                buffer(i, j)%codepoint = 32
+                buffer(i, j)%fg_color = COLOR_DEFAULT
+                buffer(i, j)%bg_color = COLOR_DEFAULT
+                buffer(i, j)%attributes = 0
+            end do
+        end do
+    end subroutine clear_buffer
 
 end module terminal_grid

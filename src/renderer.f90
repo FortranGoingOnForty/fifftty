@@ -584,7 +584,11 @@ contains
                         ! Show current grid starting from top
                         grid_row = row - grid%scroll_offset
                         if (grid_row >= 1 .and. grid_row <= grid%rows) then
-                            cell = grid%cells(col, grid_row)
+                            if (grid%use_alt_screen) then
+                                cell = grid%alt_cells(col, grid_row)
+                            else
+                                cell = grid%cells(col, grid_row)
+                            end if
                         else
                             cell%codepoint = 32
                             cell%fg_color = COLOR_DEFAULT
@@ -594,7 +598,11 @@ contains
                     end if
                 else
                     ! Not scrolled - show current grid normally
-                    cell = grid%cells(col, row)
+                    if (grid%use_alt_screen) then
+                        cell = grid%alt_cells(col, row)
+                    else
+                        cell = grid%cells(col, row)
+                    end if
                 end if
 
                 ! Skip empty cells and spaces
@@ -623,13 +631,21 @@ contains
                     else
                         grid_row = row - grid%scroll_offset
                         if (grid_row >= 1 .and. grid_row <= grid%rows) then
-                            cell = grid%cells(col, grid_row)
+                            if (grid%use_alt_screen) then
+                                cell = grid%alt_cells(col, grid_row)
+                            else
+                                cell = grid%cells(col, grid_row)
+                            end if
                         else
                             cell%attributes = 0
                         end if
                     end if
                 else
-                    cell = grid%cells(col, row)
+                    if (grid%use_alt_screen) then
+                        cell = grid%alt_cells(col, row)
+                    else
+                        cell = grid%cells(col, row)
+                    end if
                 end if
 
                 ! Check if this cell starts an underlined sequence
@@ -655,13 +671,21 @@ contains
                             else
                                 grid_row = row - grid%scroll_offset
                                 if (grid_row >= 1 .and. grid_row <= grid%rows) then
-                                    cell = grid%cells(col, grid_row)
+                                    if (grid%use_alt_screen) then
+                                        cell = grid%alt_cells(col, grid_row)
+                                    else
+                                        cell = grid%cells(col, grid_row)
+                                    end if
                                 else
                                     cell%attributes = 0
                                 end if
                             end if
                         else
-                            cell = grid%cells(col, row)
+                            if (grid%use_alt_screen) then
+                                cell = grid%alt_cells(col, row)
+                            else
+                                cell = grid%cells(col, row)
+                            end if
                         end if
                         if (iand(cell%attributes, ATTR_UNDERLINE) == 0) exit
                         end_col = col

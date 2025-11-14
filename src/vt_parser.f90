@@ -539,17 +539,13 @@ contains
                         if (DEBUG_SEQUENCES) print '(A)', "DECTCEM: Cursor hidden"
                     end if
                 case (1049)  ! Alternate screen buffer with cursor save/restore
-                    ! Phase 2: Still ignoring alternate screen (defer to Phase 3)
-                    ! This avoids clearing issues while fish/zsh initialize
-                    ! Proper implementation would need two separate screen buffers
-                    if (DEBUG_SEQUENCES) then
-                        if (final_byte == 'h') then
-                            print '(A)', "ALT_SCREEN ENTER: ignored (Phase 2)"
-                        else if (final_byte == 'l') then
-                            print '(A)', "ALT_SCREEN EXIT: ignored (Phase 2)"
-                        end if
+                    if (final_byte == 'h') then
+                        call grid%switch_to_alt_screen()
+                        if (DEBUG_SEQUENCES) print '(A)', "ALT_SCREEN: Switched to alternate screen"
+                    else if (final_byte == 'l') then
+                        call grid%switch_to_main_screen()
+                        if (DEBUG_SEQUENCES) print '(A)', "ALT_SCREEN: Switched to main screen"
                     end if
-                    ! Do nothing - let applications use the main screen
                 case (2004)  ! Bracketed paste mode
                     if (final_byte == 'h') then
                         parser%bracketed_paste_mode = .true.
