@@ -56,6 +56,9 @@ module terminal_grid
         integer :: history_start = 1               ! Index of oldest line (circular buffer)
         integer :: history_count = 0               ! Number of lines in history
         integer :: scroll_offset = 0               ! How far back we're viewing (0 = current)
+        ! Scrolling region (DECSTBM)
+        integer :: scroll_top = 1                  ! Top margin (1-indexed)
+        integer :: scroll_bottom = 0               ! Bottom margin (0 = use rows)
     contains
         procedure :: init => grid_init
         procedure :: destroy => grid_destroy
@@ -75,6 +78,7 @@ module terminal_grid
         procedure :: delete_chars => grid_delete_chars
         procedure :: insert_lines => grid_insert_lines
         procedure :: delete_lines => grid_delete_lines
+        procedure :: set_scroll_region => grid_set_scroll_region
     end type grid_t
 
 contains
@@ -99,6 +103,10 @@ contains
         this%history_start = 1
         this%history_count = 0
         this%scroll_offset = 0
+
+        ! Initialize scrolling region to full screen
+        this%scroll_top = 1
+        this%scroll_bottom = rows
     end subroutine grid_init
 
     ! Destroy grid and free memory
@@ -177,32 +185,37 @@ contains
         cell = this%cells(col, row)
     end function grid_get_cell
 
-    ! Scroll the grid up by one line (insert blank line at bottom)
+    ! Scroll the grid up by one line (insert blank line at bottom of scroll region)
     subroutine grid_scroll_up(this)
         class(grid_t), intent(inout) :: this
-        integer :: row, history_idx
+        integer :: row, history_idx, region_bottom
 
-        ! Save top line to history before scrolling
-        if (this%history_count < this%history_size) then
-            ! History not full yet, add to end
-            history_idx = this%history_count + 1
-            this%history(:, history_idx) = this%cells(:, 1)
-            this%history_count = this%history_count + 1
-        else
-            ! History full, use circular buffer (overwrite oldest)
-            history_idx = this%history_start
-            this%history(:, history_idx) = this%cells(:, 1)
-            ! Move start pointer forward (circular)
-            this%history_start = mod(this%history_start, this%history_size) + 1
+        region_bottom = this%scroll_bottom
+        if (region_bottom <= 0) region_bottom = this%rows
+
+        ! Only save to history if scrolling from top of screen
+        if (this%scroll_top == 1) then
+            if (this%history_count < this%history_size) then
+                ! History not full yet, add to end
+                history_idx = this%history_count + 1
+                this%history(:, history_idx) = this%cells(:, this%scroll_top)
+                this%history_count = this%history_count + 1
+            else
+                ! History full, use circular buffer (overwrite oldest)
+                history_idx = this%history_start
+                this%history(:, history_idx) = this%cells(:, this%scroll_top)
+                ! Move start pointer forward (circular)
+                this%history_start = mod(this%history_start, this%history_size) + 1
+            end if
         end if
 
-        ! Shift all rows up
-        do row = 1, this%rows - 1
+        ! Shift rows up within the scroll region
+        do row = this%scroll_top, region_bottom - 1
             this%cells(:, row) = this%cells(:, row + 1)
         end do
 
-        ! Clear bottom row
-        call this%clear_line(this%rows)
+        ! Clear bottom row of scroll region
+        call this%clear_line(region_bottom)
 
         ! Reset scroll offset when new content arrives
         this%scroll_offset = 0
@@ -368,47 +381,67 @@ contains
     end subroutine grid_delete_chars
 
     ! Insert n blank lines at cursor position (IL - Insert Line)
-    ! Lines from cursor row down shift down, bottom lines are lost
+    ! Lines from cursor row down shift down within scroll region, bottom lines are lost
     subroutine grid_insert_lines(this, count)
         class(grid_t), intent(inout) :: this
         integer, intent(in) :: count
-        integer :: i, n, start_row
+        integer :: i, n, start_row, region_bottom
 
         start_row = this%cursor_row
-        n = min(count, this%rows - start_row + 1)  ! Don't insert more than will fit
+        region_bottom = this%scroll_bottom
+        if (region_bottom <= 0) region_bottom = this%rows
+        n = min(count, region_bottom - start_row + 1)  ! Don't insert more than will fit
 
-        ! Shift lines down from bottom to cursor position
-        do i = this%rows, start_row + n, -1
+        ! Shift lines down from bottom of region to cursor position
+        do i = region_bottom, start_row + n, -1
             if (i - n >= start_row) then
                 this%cells(:, i) = this%cells(:, i - n)
             end if
         end do
 
         ! Fill inserted lines with blanks
-        do i = start_row, min(start_row + n - 1, this%rows)
+        do i = start_row, min(start_row + n - 1, region_bottom)
             call this%clear_line(i)
         end do
     end subroutine grid_insert_lines
 
     ! Delete n lines at cursor position (DL - Delete Line)
-    ! Lines below cursor shift up, blank lines fill bottom
+    ! Lines below cursor shift up within scroll region, blank lines fill bottom
     subroutine grid_delete_lines(this, count)
         class(grid_t), intent(inout) :: this
         integer, intent(in) :: count
-        integer :: i, n, start_row
+        integer :: i, n, start_row, region_bottom
 
         start_row = this%cursor_row
-        n = min(count, this%rows - start_row + 1)  ! Don't delete more than available
+        region_bottom = this%scroll_bottom
+        if (region_bottom <= 0) region_bottom = this%rows
+        n = min(count, region_bottom - start_row + 1)  ! Don't delete more than available
 
-        ! Shift lines up
-        do i = start_row, this%rows - n
+        ! Shift lines up within region
+        do i = start_row, region_bottom - n
             this%cells(:, i) = this%cells(:, i + n)
         end do
 
-        ! Fill bottom with blank lines
-        do i = this%rows - n + 1, this%rows
+        ! Fill bottom of region with blank lines
+        do i = region_bottom - n + 1, region_bottom
             call this%clear_line(i)
         end do
     end subroutine grid_delete_lines
+
+    ! Set scrolling region (DECSTBM)
+    subroutine grid_set_scroll_region(this, top, bottom)
+        class(grid_t), intent(inout) :: this
+        integer, intent(in) :: top, bottom
+
+        ! Validate and set scroll region
+        if (top >= 1 .and. bottom <= this%rows .and. top < bottom) then
+            this%scroll_top = top
+            this%scroll_bottom = bottom
+        else if (top == 0 .and. bottom == 0) then
+            ! Reset to full screen
+            this%scroll_top = 1
+            this%scroll_bottom = this%rows
+        end if
+    end subroutine grid_set_scroll_region
 
 end module terminal_grid

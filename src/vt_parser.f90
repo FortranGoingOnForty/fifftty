@@ -644,6 +644,18 @@ contains
             if (parser%num_params >= 1) row = max(1, parser%params(1))
             call grid%move_cursor(row, grid%cursor_col)
 
+        case ('r')  ! DECSTBM - Set Top and Bottom Margins (scrolling region)
+            if (parser%num_params == 0) then
+                ! No parameters - reset to full screen
+                call grid%set_scroll_region(0, 0)
+            else if (parser%num_params >= 2) then
+                ! Set specific region
+                call grid%set_scroll_region(parser%params(1), parser%params(2))
+            end if
+            if (DEBUG_SEQUENCES) then
+                print '(A,I0,A,I0)', "SET SCROLL REGION: ", grid%scroll_top, " to ", grid%scroll_bottom
+            end if
+
         case ('P')  ! DCH - Delete Character
             n = 1
             if (parser%num_params >= 1) n = max(1, parser%params(1))
