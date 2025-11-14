@@ -5,6 +5,15 @@ set(CMAKE_Fortran_COMPILER "gfortran")
 
 project(fortty LANGUAGES Fortran C)
 
+# Platform detection for platform-specific constants
+if(APPLE)
+    add_definitions(-DPLATFORM_MACOS)
+    message(STATUS "Detected macOS platform")
+elseif(UNIX)
+    add_definitions(-DPLATFORM_LINUX)
+    message(STATUS "Detected Linux platform")
+endif()
+
 # Fortran compiler flags (GCC/gfortran specific)
 if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
     set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -Wall -Wextra -std=f2018")
@@ -17,6 +26,9 @@ elseif(CMAKE_Fortran_COMPILER_ID MATCHES "Flang|LLVMFlang")
 else()
     message(WARNING "Untested Fortran compiler: ${CMAKE_Fortran_COMPILER_ID}")
 endif()
+
+# Enable preprocessing only for pty_manager.f90 (needs platform-specific constants)
+set_source_files_properties(src/pty_manager.f90 PROPERTIES COMPILE_FLAGS "-cpp")
 
 # Use pkg-config to find dependencies
 find_package(PkgConfig REQUIRED)

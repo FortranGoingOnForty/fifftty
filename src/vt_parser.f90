@@ -38,6 +38,9 @@ module vt_parser
         ! UTF-8 decoder state
         integer :: utf8_bytes_needed = 0    ! How many continuation bytes we're expecting
         integer :: utf8_codepoint = 0       ! Accumulator for the codepoint being built
+        ! DEC private mode states
+        logical :: application_cursor_keys = .false.  ! ?1 - DECCKM
+        logical :: bracketed_paste_mode = .false.     ! ?2004
     contains
         procedure :: reset => parser_reset
         procedure :: process_byte => parser_process_byte
@@ -519,18 +522,42 @@ contains
             ! Handle key DEC private modes
             if (parser%num_params >= 1) then
                 select case (parser%params(1))
+                case (1)  ! DECCKM - Application cursor keys
+                    if (final_byte == 'h') then
+                        parser%application_cursor_keys = .true.
+                        if (DEBUG_SEQUENCES) print '(A)', "DECCKM: Application cursor keys enabled"
+                    else if (final_byte == 'l') then
+                        parser%application_cursor_keys = .false.
+                        if (DEBUG_SEQUENCES) print '(A)', "DECCKM: Normal cursor keys"
+                    end if
+                case (25)  ! DECTCEM - Text cursor enable/disable
+                    if (final_byte == 'h') then
+                        grid%cursor_visible = .true.
+                        if (DEBUG_SEQUENCES) print '(A)', "DECTCEM: Cursor visible"
+                    else if (final_byte == 'l') then
+                        grid%cursor_visible = .false.
+                        if (DEBUG_SEQUENCES) print '(A)', "DECTCEM: Cursor hidden"
+                    end if
                 case (1049)  ! Alternate screen buffer with cursor save/restore
-                    ! Phase 1: Completely ignore alternate screen
+                    ! Phase 2: Still ignoring alternate screen (defer to Phase 3)
                     ! This avoids clearing issues while fish/zsh initialize
                     ! Proper implementation would need two separate screen buffers
                     if (DEBUG_SEQUENCES) then
                         if (final_byte == 'h') then
-                            print '(A)', "ALT_SCREEN ENTER: ignored"
+                            print '(A)', "ALT_SCREEN ENTER: ignored (Phase 2)"
                         else if (final_byte == 'l') then
-                            print '(A)', "ALT_SCREEN EXIT: ignored"
+                            print '(A)', "ALT_SCREEN EXIT: ignored (Phase 2)"
                         end if
                     end if
-                    ! Do nothing - let fish use the main screen for everything
+                    ! Do nothing - let applications use the main screen
+                case (2004)  ! Bracketed paste mode
+                    if (final_byte == 'h') then
+                        parser%bracketed_paste_mode = .true.
+                        if (DEBUG_SEQUENCES) print '(A)', "Bracketed paste mode enabled"
+                    else if (final_byte == 'l') then
+                        parser%bracketed_paste_mode = .false.
+                        if (DEBUG_SEQUENCES) print '(A)', "Bracketed paste mode disabled"
+                    end if
                 end select
             end if
             return

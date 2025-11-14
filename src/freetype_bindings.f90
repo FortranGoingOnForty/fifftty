@@ -41,8 +41,8 @@ module freetype_bindings
         integer(c_int) :: pitch
         type(c_ptr) :: buffer
         integer(c_short) :: num_grays
-        integer(c_char) :: pixel_mode
-        integer(c_char) :: palette_mode
+        character(c_char) :: pixel_mode
+        character(c_char) :: palette_mode
         type(c_ptr) :: palette
     end type FT_Bitmap
 
