@@ -221,7 +221,13 @@ contains
             grid%cursor_col = 1
             grid%pending_wrap = .false.  ! Clear pending wrap on CR
         else if (byte == 8) then  ! BS (backspace)
-            if (grid%cursor_col > 1) grid%cursor_col = grid%cursor_col - 1
+            if (grid%cursor_col > 1) then
+                grid%cursor_col = grid%cursor_col - 1
+            else if (grid%cursor_row > 1) then
+                ! Allow backspace to wrap to previous line (standard terminal behavior)
+                grid%cursor_row = grid%cursor_row - 1
+                grid%cursor_col = grid%cols
+            end if
             grid%pending_wrap = .false.  ! Clear pending wrap on backspace
         else if (byte == 9) then  ! HT (tab)
             grid%cursor_col = ((grid%cursor_col - 1) / 8 + 1) * 8 + 1
@@ -659,6 +665,7 @@ contains
         case ('A')  ! CUU - Cursor Up
             n = max(1, parser%params(1))
             grid%cursor_row = max(1, grid%cursor_row - n)
+            grid%pending_wrap = .false.  ! Clear pending wrap on cursor movement
             if (DEBUG_SEQUENCES) then
                 print '(A,I0,A,I0)', "CURSOR UP by ", n, " -> row=", grid%cursor_row
             end if
@@ -666,6 +673,7 @@ contains
         case ('B')  ! CUD - Cursor Down
             n = max(1, parser%params(1))
             grid%cursor_row = min(grid%rows, grid%cursor_row + n)
+            grid%pending_wrap = .false.  ! Clear pending wrap on cursor movement
             if (DEBUG_SEQUENCES) then
                 print '(A,I0,A,I0)', "CURSOR DOWN by ", n, " -> row=", grid%cursor_row
             end if
@@ -673,16 +681,19 @@ contains
         case ('C')  ! CUF - Cursor Forward
             n = max(1, parser%params(1))
             grid%cursor_col = min(grid%cols, grid%cursor_col + n)
+            grid%pending_wrap = .false.  ! Clear pending wrap on cursor movement
 
         case ('D')  ! CUB - Cursor Back
             n = max(1, parser%params(1))
             grid%cursor_col = max(1, grid%cursor_col - n)
+            grid%pending_wrap = .false.  ! Clear pending wrap on cursor movement
 
         case ('H', 'f')  ! CUP - Cursor Position
             row = max(1, parser%params(1))
             col = 1
             if (parser%num_params >= 2) col = max(1, parser%params(2))
             call grid%move_cursor(row, col)
+            grid%pending_wrap = .false.  ! Clear pending wrap on cursor movement
 
         case ('J')  ! ED - Erase Display
             n = 0
