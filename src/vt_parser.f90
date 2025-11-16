@@ -218,6 +218,9 @@ contains
         else if (byte == 10) then  ! LF (newline)
             call handle_newline(grid)
         else if (byte == 13) then  ! CR (carriage return)
+            if (DEBUG_SEQUENCES .and. grid%pending_wrap) then
+                print '(A)', "CR: Clearing pending_wrap"
+            end if
             grid%cursor_col = 1
             grid%pending_wrap = .false.  ! Clear pending wrap on CR
         else if (byte == 8) then  ! BS (backspace)
@@ -686,6 +689,9 @@ contains
         case ('D')  ! CUB - Cursor Back
             n = max(1, parser%params(1))
             grid%cursor_col = max(1, grid%cursor_col - n)
+            if (DEBUG_SEQUENCES .and. grid%pending_wrap) then
+                print '(A,I0,A)', "CSI ", n, " D: Clearing pending_wrap"
+            end if
             grid%pending_wrap = .false.  ! Clear pending wrap on cursor movement
 
         case ('H', 'f')  ! CUP - Cursor Position
@@ -1134,10 +1140,18 @@ contains
         ! Instead, clamp cursor to last column and set pending_wrap flag
         ! The wrap will happen when the NEXT character is written
         if (grid%cursor_col == grid%cols + 1) then
+            if (DEBUG_SEQUENCES) then
+                print '(A,I0,A,I0,A,I0)', "EDGE: cursor reached cols+1 (", grid%cursor_col, &
+                    "), clamping to ", grid%cols, ", char=", codepoint
+            end if
             grid%cursor_col = grid%cols
             grid%pending_wrap = .true.
         else if (grid%cursor_col > grid%cols + 1) then
             ! For double-width chars that go past cols+1, wrap immediately
+            if (DEBUG_SEQUENCES) then
+                print '(A,I0,A,I0,A,I0)', "EDGE: cursor past cols+1 (", grid%cursor_col, &
+                    " > ", grid%cols + 1, "), wrapping immediately, char=", codepoint
+            end if
             call handle_newline(grid)
         end if
     end subroutine write_char
