@@ -668,7 +668,7 @@ contains
         case ('A')  ! CUU - Cursor Up
             n = max(1, parser%params(1))
             grid%cursor_row = max(1, grid%cursor_row - n)
-            grid%pending_wrap = .false.  ! Clear pending wrap on cursor movement
+            ! Don't clear pending_wrap - let it persist across cursor movements
             if (DEBUG_SEQUENCES) then
                 print '(A,I0,A,I0)', "CURSOR UP by ", n, " -> row=", grid%cursor_row
             end if
@@ -676,7 +676,7 @@ contains
         case ('B')  ! CUD - Cursor Down
             n = max(1, parser%params(1))
             grid%cursor_row = min(grid%rows, grid%cursor_row + n)
-            grid%pending_wrap = .false.  ! Clear pending wrap on cursor movement
+            ! Don't clear pending_wrap - let it persist across cursor movements
             if (DEBUG_SEQUENCES) then
                 print '(A,I0,A,I0)', "CURSOR DOWN by ", n, " -> row=", grid%cursor_row
             end if
@@ -684,22 +684,22 @@ contains
         case ('C')  ! CUF - Cursor Forward
             n = max(1, parser%params(1))
             grid%cursor_col = min(grid%cols, grid%cursor_col + n)
-            grid%pending_wrap = .false.  ! Clear pending wrap on cursor movement
+            ! Don't clear pending_wrap - let it persist across cursor movements
 
         case ('D')  ! CUB - Cursor Back
             n = max(1, parser%params(1))
             grid%cursor_col = max(1, grid%cursor_col - n)
+            ! Don't clear pending_wrap - let it persist across cursor movements
             if (DEBUG_SEQUENCES .and. grid%pending_wrap) then
-                print '(A,I0,A)', "CSI ", n, " D: Clearing pending_wrap"
+                print '(A,I0,A)', "CSI ", n, " D: NOT clearing pending_wrap (preserved)"
             end if
-            grid%pending_wrap = .false.  ! Clear pending wrap on cursor movement
 
         case ('H', 'f')  ! CUP - Cursor Position
             row = max(1, parser%params(1))
             col = 1
             if (parser%num_params >= 2) col = max(1, parser%params(2))
             call grid%move_cursor(row, col)
-            grid%pending_wrap = .false.  ! Clear pending wrap on cursor movement
+            ! Don't clear pending_wrap - let it persist across cursor movements
 
         case ('J')  ! ED - Erase Display
             n = 0
