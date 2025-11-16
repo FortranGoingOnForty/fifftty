@@ -599,8 +599,11 @@ contains
             ! Send to PTY
             bytes_written = global_pty%write(mouse_seq, seq_len)
         else
-            ! Mouse tracking disabled - use for text selection
+            ! Mouse tracking disabled - clear existing selection and prepare for drag
             mouse_button_pressed = .true.
+            ! Clear any existing selection (standard terminal behavior: click without drag clears)
+            call global_grid%clear_selection()
+            ! Set selection start for potential drag
             call global_grid%set_selection_start(grid_row, grid_col)
             call gtk_gl_area_queue_render(global_gl_area)
         end if
