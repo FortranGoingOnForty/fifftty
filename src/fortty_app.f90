@@ -347,10 +347,14 @@ contains
             end if
         end if
 
-        ! Check for Ctrl+Shift+C (copy selection to clipboard)
+        ! Check for Ctrl+Shift+C (copy) and Ctrl+Shift+V (paste)
         if (iand(state, GDK_CONTROL_MASK) /= 0 .and. iand(state, GDK_SHIFT_MASK) /= 0) then
             if (keyval == ichar('C') .or. keyval == ichar('c')) then
                 call copy_selection_to_clipboard()
+                handled = 1
+                return
+            else if (keyval == ichar('V') .or. keyval == ichar('v')) then
+                call paste_from_clipboard()
                 handled = 1
                 return
             end if
@@ -698,6 +702,69 @@ contains
         call global_grid%clear_selection()
         call gtk_gl_area_queue_render(global_gl_area)
     end subroutine copy_selection_to_clipboard
+
+    ! Paste from clipboard callback (called when async read completes)
+    subroutine clipboard_read_callback(source_object, res, user_data) bind(c)
+        type(c_ptr), value :: source_object, res, user_data
+        type(c_ptr) :: text_ptr, error
+        character(len=8192) :: paste_text
+        character(kind=c_char), pointer :: c_str(:)
+        integer :: i, text_len, bytes_written
+
+        error = c_null_ptr
+        text_ptr = gdk_clipboard_read_text_finish(source_object, res, error)
+
+        if (.not. c_associated(text_ptr)) return
+
+        ! Convert C string to Fortran string
+        call c_f_pointer(text_ptr, c_str, [8192])
+        paste_text = ""
+        text_len = 0
+        do i = 1, 8192
+            if (c_str(i) == c_null_char) exit
+            text_len = i
+            paste_text(i:i) = c_str(i)
+        end do
+
+        if (text_len <= 0) then
+            call g_free(text_ptr)
+            return
+        end if
+
+        ! Send paste with bracketed paste mode if enabled
+        if (global_parser%bracketed_paste_mode) then
+            ! Send bracketed paste start sequence
+            bytes_written = global_pty%write(char(27) // "[200~", 6)
+        end if
+
+        ! Send the pasted text
+        bytes_written = global_pty%write(paste_text, text_len)
+
+        if (global_parser%bracketed_paste_mode) then
+            ! Send bracketed paste end sequence
+            bytes_written = global_pty%write(char(27) // "[201~", 6)
+        end if
+
+        call g_free(text_ptr)
+    end subroutine clipboard_read_callback
+
+    ! Paste from clipboard
+    subroutine paste_from_clipboard()
+        type(c_ptr) :: display, clipboard
+
+        if (.not. initialized) return
+
+        ! Get display and clipboard
+        display = gtk_widget_get_display(global_gl_area)
+        if (.not. c_associated(display)) return
+
+        clipboard = gdk_display_get_clipboard(display)
+        if (.not. c_associated(clipboard)) return
+
+        ! Start async read from clipboard
+        call gdk_clipboard_read_text_async(clipboard, c_null_ptr, &
+            c_funloc(clipboard_read_callback), c_null_ptr)
+    end subroutine paste_from_clipboard
 
     ! Change font size dynamically
     subroutine change_font_size(new_size)

@@ -264,6 +264,30 @@ module gtk_bindings
             type(c_ptr), value :: clipboard
             character(kind=c_char), dimension(*) :: text
         end subroutine gdk_clipboard_set_text
+
+        ! Async clipboard read
+        subroutine gdk_clipboard_read_text_async(clipboard, cancellable, callback, user_data) &
+            bind(c, name="gdk_clipboard_read_text_async")
+            import :: c_ptr, c_funptr
+            type(c_ptr), value :: clipboard
+            type(c_ptr), value :: cancellable
+            type(c_funptr), value :: callback
+            type(c_ptr), value :: user_data
+        end subroutine gdk_clipboard_read_text_async
+
+        function gdk_clipboard_read_text_finish(clipboard, result, error) &
+            bind(c, name="gdk_clipboard_read_text_finish")
+            import :: c_ptr
+            type(c_ptr), value :: clipboard
+            type(c_ptr), value :: result
+            type(c_ptr) :: error
+            type(c_ptr) :: gdk_clipboard_read_text_finish
+        end function gdk_clipboard_read_text_finish
+
+        subroutine g_free(mem) bind(c, name="g_free")
+            import :: c_ptr
+            type(c_ptr), value :: mem
+        end subroutine g_free
     end interface
 
 contains
