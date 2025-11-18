@@ -6,7 +6,7 @@ module vt_parser
     private
 
     ! Debug flag for escape sequence logging
-    logical, parameter :: DEBUG_SEQUENCES = .true.
+    logical, parameter :: DEBUG_SEQUENCES = .false.
 
     ! Parser states (VT100/ANSI state machine)
     integer, parameter, public :: STATE_GROUND = 0
@@ -665,41 +665,40 @@ contains
         end if
 
         select case (final_byte)
-        case ('A')  ! CUU - Cursor Up
+        case ('A')  ! CUU - Cursor Up (relative - preserve pending_wrap)
             n = max(1, parser%params(1))
             grid%cursor_row = max(1, grid%cursor_row - n)
-            ! Don't clear pending_wrap - let it persist across cursor movements
             if (DEBUG_SEQUENCES) then
                 print '(A,I0,A,I0)', "CURSOR UP by ", n, " -> row=", grid%cursor_row
             end if
 
-        case ('B')  ! CUD - Cursor Down
+        case ('B')  ! CUD - Cursor Down (relative - preserve pending_wrap)
             n = max(1, parser%params(1))
             grid%cursor_row = min(grid%rows, grid%cursor_row + n)
-            ! Don't clear pending_wrap - let it persist across cursor movements
             if (DEBUG_SEQUENCES) then
                 print '(A,I0,A,I0)', "CURSOR DOWN by ", n, " -> row=", grid%cursor_row
             end if
 
-        case ('C')  ! CUF - Cursor Forward
+        case ('C')  ! CUF - Cursor Forward (relative - preserve pending_wrap)
             n = max(1, parser%params(1))
             grid%cursor_col = min(grid%cols, grid%cursor_col + n)
-            ! Don't clear pending_wrap - let it persist across cursor movements
 
-        case ('D')  ! CUB - Cursor Back
+        case ('D')  ! CUB - Cursor Back (relative - preserve pending_wrap)
             n = max(1, parser%params(1))
             grid%cursor_col = max(1, grid%cursor_col - n)
-            ! Don't clear pending_wrap - let it persist across cursor movements
             if (DEBUG_SEQUENCES .and. grid%pending_wrap) then
-                print '(A,I0,A)', "CSI ", n, " D: NOT clearing pending_wrap (preserved)"
+                print '(A,I0,A)', "CSI ", n, " D: Preserving pending_wrap (relative movement)"
             end if
 
-        case ('H', 'f')  ! CUP - Cursor Position
+        case ('H', 'f')  ! CUP - Cursor Position (absolute - clear pending_wrap)
             row = max(1, parser%params(1))
             col = 1
             if (parser%num_params >= 2) col = max(1, parser%params(2))
             call grid%move_cursor(row, col)
-            ! Don't clear pending_wrap - let it persist across cursor movements
+            if (DEBUG_SEQUENCES .and. grid%pending_wrap) then
+                print '(A,I0,A,I0,A)', "CUP: Clearing pending_wrap (absolute positioning to ", row, ",", col, ")"
+            end if
+            grid%pending_wrap = .false.
 
         case ('J')  ! ED - Erase Display
             n = 0
@@ -1080,17 +1079,29 @@ contains
         integer :: prev_col
         type(cell_t) :: cell
 
-        ! DEBUG: Log characters being written
-        if (DEBUG_SEQUENCES .and. (codepoint == 48 .or. codepoint == 113)) then
+        ! DEBUG: Log characters near edge with grid dimensions
+        if (grid%cursor_col >= grid%cols - 5) then
             if (codepoint >= 32 .and. codepoint <= 126) then
-                print '(A,I0,A,A,A,I0,A,I0,A,I0)', "WRITECHAR: Writing '", codepoint, " ('", char(codepoint), &
-                      "') at row=", grid%cursor_row, " col=", grid%cursor_col, " parser_state=", parser%state
+                print '(A,A,A,I0,A,I0,A,I0)', "NEAR_EDGE: '", char(codepoint), &
+                      "' row=", grid%cursor_row, " col=", grid%cursor_col, " grid_cols=", grid%cols
             end if
         end if
 
-        ! VT100 pending wrap: if we're in pending wrap state, perform the wrap now
+        ! VT100 pending wrap: if we're in pending wrap state AND still at last column, wrap now
+        ! If cursor was moved away from edge, clear pending_wrap without wrapping
         if (grid%pending_wrap) then
-            call handle_newline(grid)
+            if (grid%cursor_col == grid%cols) then
+                ! Still at edge - perform the wrap
+                if (DEBUG_SEQUENCES) then
+                    print '(A,I0,A)', "PENDING_WRAP: Wrapping before writing char ", codepoint, " ('"//char(codepoint)//"')"
+                end if
+                call handle_newline(grid)
+            else
+                ! Cursor moved away from edge - just clear the flag
+                if (DEBUG_SEQUENCES) then
+                    print '(A,I0,A,I0)', "PENDING_WRAP: Clearing (cursor at col ", grid%cursor_col, ", not at edge)"
+                end if
+            end if
             grid%pending_wrap = .false.
         end if
 
@@ -1136,9 +1147,8 @@ contains
             print '(A,I0)', "DEBUG: cursor_col after: ", grid%cursor_col
         end if
 
-        ! VT100 pending wrap behavior: if cursor is exactly at cols+1, don't wrap yet
-        ! Instead, clamp cursor to last column and set pending_wrap flag
-        ! The wrap will happen when the NEXT character is written
+        ! VT100 pending wrap: if cursor is exactly at cols+1, set pending_wrap
+        ! The wrap happens when the NEXT character is written (see top of this subroutine)
         if (grid%cursor_col == grid%cols + 1) then
             if (DEBUG_SEQUENCES) then
                 print '(A,I0,A,I0,A,I0)', "EDGE: cursor reached cols+1 (", grid%cursor_col, &

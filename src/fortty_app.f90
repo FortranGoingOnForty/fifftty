@@ -168,7 +168,8 @@ contains
         end if
 
         ! Calculate terminal grid size from window and cell dimensions
-        grid_cols = physical_width / global_renderer%cell_width
+        ! Account for left padding (20px) in the renderer
+        grid_cols = (physical_width - 20) / global_renderer%cell_width
         grid_rows = physical_height / global_renderer%cell_height
 
         print '(A,I0,A,I0,A,I0,A,I0)', "DEBUG: Physical size ", physical_width, "x", physical_height, &
@@ -278,8 +279,8 @@ contains
             print '(A,I0,A,I0)', "DEBUG: Renderer viewport updated to logical: ", width, "x", height
         end if
 
-        ! Calculate grid dimensions from physical size
-        new_grid_cols = physical_width / global_renderer%cell_width
+        ! Calculate grid dimensions from physical size (account for 20px left padding)
+        new_grid_cols = (physical_width - 20) / global_renderer%cell_width
         new_grid_rows = physical_height / global_renderer%cell_height
 
         ! Ensure minimum grid size
@@ -499,8 +500,8 @@ contains
         ! Update renderer with new physical dimensions
         call global_renderer%resize(new_physical_width, new_physical_height)
 
-        ! Calculate new grid dimensions
-        new_grid_cols = new_physical_width / global_renderer%cell_width
+        ! Calculate new grid dimensions (account for 20px left padding)
+        new_grid_cols = (new_physical_width - 20) / global_renderer%cell_width
         new_grid_rows = new_physical_height / global_renderer%cell_height
 
         print '(A,I0,A,I0)', "DEBUG: New grid size: ", new_grid_cols, "x", new_grid_rows
@@ -737,8 +738,8 @@ contains
             return
         end if
 
-        ! Calculate new grid dimensions
-        new_grid_cols = physical_width / global_renderer%cell_width
+        ! Calculate new grid dimensions (account for 20px left padding)
+        new_grid_cols = (physical_width - 20) / global_renderer%cell_width
         new_grid_rows = physical_height / global_renderer%cell_height
 
         ! Ensure minimum grid size

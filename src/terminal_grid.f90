@@ -281,6 +281,21 @@ contains
         deallocate(this%cells)
         allocate(this%cells(new_cols, new_rows))
 
+        ! Also resize alt_cells buffer
+        if (allocated(this%alt_cells)) then
+            deallocate(this%alt_cells)
+            allocate(this%alt_cells(new_cols, new_rows))
+        end if
+
+        ! Resize history buffer (clear history on resize since column count changes)
+        if (allocated(this%history)) then
+            deallocate(this%history)
+            allocate(this%history(new_cols, this%history_size))
+            this%history_start = 1
+            this%history_count = 0
+            this%scroll_offset = 0
+        end if
+
         ! Update dimensions BEFORE clearing (grid_clear uses this%rows/cols!)
         this%rows = new_rows
         this%cols = new_cols
@@ -302,6 +317,9 @@ contains
         ! Clamp cursor to new bounds
         if (this%cursor_row > new_rows) this%cursor_row = new_rows
         if (this%cursor_col > new_cols) this%cursor_col = new_cols
+
+        ! Update scroll region to match new size
+        this%scroll_bottom = new_rows
 
         deallocate(old_cells)
     end subroutine grid_resize
