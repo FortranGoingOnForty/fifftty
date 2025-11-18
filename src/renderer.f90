@@ -534,6 +534,7 @@ contains
         integer :: row, col
         integer :: start_col, end_col
         integer :: underline_color, underline_attrs
+        integer :: start_hyperlink
         integer :: history_line, grid_row
         type(cell_t) :: cell
         type(cell_t), allocatable :: history_cells(:)
@@ -653,14 +654,15 @@ contains
                     end if
                 end if
 
-                ! Check if this cell starts an underlined sequence
-                if (iand(cell%attributes, ATTR_UNDERLINE) /= 0) then
+                ! Check if this cell starts an underlined sequence (ATTR_UNDERLINE or hyperlink)
+                if (iand(cell%attributes, ATTR_UNDERLINE) /= 0 .or. cell%hyperlink_id > 0) then
                     ! Find the end of the underlined sequence
                     start_col = col
                     underline_color = cell%fg_color
                     underline_attrs = cell%attributes
+                    start_hyperlink = cell%hyperlink_id
 
-                    ! Continue while cells have underline attribute
+                    ! Continue while cells have underline attribute or same hyperlink
                     do while (col <= grid%cols)
                         ! Get cell with scrollback support
                         if (grid%scroll_offset > 0) then
@@ -672,6 +674,7 @@ contains
                                     deallocate(history_cells)
                                 else
                                     cell%attributes = 0
+                                    cell%hyperlink_id = 0
                                 end if
                             else
                                 grid_row = row - grid%scroll_offset
@@ -683,6 +686,7 @@ contains
                                     end if
                                 else
                                     cell%attributes = 0
+                                    cell%hyperlink_id = 0
                                 end if
                             end if
                         else
@@ -692,7 +696,9 @@ contains
                                 cell = grid%cells(col, row)
                             end if
                         end if
-                        if (iand(cell%attributes, ATTR_UNDERLINE) == 0) exit
+                        ! Exit if neither underline attribute nor matching hyperlink
+                        if (iand(cell%attributes, ATTR_UNDERLINE) == 0 .and. &
+                            (start_hyperlink == 0 .or. cell%hyperlink_id /= start_hyperlink)) exit
                         end_col = col
                         col = col + 1
                     end do
