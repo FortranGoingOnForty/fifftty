@@ -292,8 +292,14 @@ contains
 
         ! Only resize if dimensions changed
         if (new_grid_cols /= old_cols .or. new_grid_rows /= old_rows) then
+            print '(A,I0,A,I0)', "DEBUG: Cursor before resize: row=", &
+                global_grid%cursor_row, " col=", global_grid%cursor_col
+
             ! Resize the grid (preserves content)
             call global_grid%resize(new_grid_rows, new_grid_cols)
+
+            print '(A,I0,A,I0)', "DEBUG: Cursor after resize: row=", &
+                global_grid%cursor_row, " col=", global_grid%cursor_col
 
             ! Update PTY window size (sends SIGWINCH to shell)
             call global_pty%resize(new_grid_rows, new_grid_cols)
@@ -317,10 +323,21 @@ contains
         integer :: bytes_written, key_len
         integer, parameter :: GDK_CONTROL_MASK = 4  ! Ctrl modifier
         integer, parameter :: GDK_SHIFT_MASK = 1    ! Shift modifier
+        integer, parameter :: GDK_META_MASK = 268435456  ! Command key on macOS (1 << 28)
+        integer, parameter :: GDK_ALT_MASK = 8  ! Alt/Option key
 
         handled = 0  ! FALSE by default
 
         if (.not. initialized) return
+
+        ! Debug disabled - key presses
+        ! print '(A,I0,A,I0,A,I0)', "DEBUG: Key pressed: keyval=", keyval, &
+        !     " keycode=", keycode, " state=", state
+
+        ! Ignore keys with Command (Meta) modifier - let system handle Cmd+C, Cmd+V, etc.
+        if (iand(state, GDK_META_MASK) /= 0) then
+            return
+        end if
 
         ! Handle scrollback navigation with Shift modifier
         if (iand(state, GDK_SHIFT_MASK) /= 0) then

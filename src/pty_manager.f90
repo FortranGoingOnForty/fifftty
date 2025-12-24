@@ -575,6 +575,8 @@ contains
         ws%ws_xpixel = 0
         ws%ws_ypixel = 0
 
+        print '(A,I0,A,I0)', "DEBUG: PTY resize -> rows=", rows, " cols=", cols
+
         if (ioctl(this%master_fd, TIOCSWINSZ, c_loc(ws)) /= 0) then
             call perror("ioctl TIOCSWINSZ resize" // c_null_char)
         end if

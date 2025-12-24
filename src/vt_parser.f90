@@ -40,6 +40,7 @@ module vt_parser
         integer :: utf8_codepoint = 0       ! Accumulator for the codepoint being built
         ! DEC private mode states
         logical :: application_cursor_keys = .false.  ! ?1 - DECCKM
+        logical :: auto_wrap_mode = .true.            ! ?7 - DECAWM (enabled by default - most terminals)
         logical :: bracketed_paste_mode = .false.     ! ?2004
         ! Mouse tracking modes
         logical :: mouse_tracking_x10 = .false.       ! ?9 - X10 mouse
@@ -216,8 +217,12 @@ contains
         if (byte == 27) then  ! ESC
             parser%state = STATE_ESCAPE
         else if (byte == 10) then  ! LF (newline)
+            print '(A,I0,A,I0,A)', "LF: Newline from row=", grid%cursor_row, &
+                " col=", grid%cursor_col, " (pending_wrap cleared)"
             call handle_newline(grid)
         else if (byte == 13) then  ! CR (carriage return)
+            print '(A,I0,A,I0)', "CR: Move to col=1 (was col=", grid%cursor_col, &
+                " row=", grid%cursor_row, ")"
             if (DEBUG_SEQUENCES .and. grid%pending_wrap) then
                 print '(A)', "CR: Clearing pending_wrap"
             end if
@@ -591,6 +596,14 @@ contains
                         parser%application_cursor_keys = .false.
                         if (DEBUG_SEQUENCES) print '(A)', "DECCKM: Normal cursor keys"
                     end if
+                case (7)  ! DECAWM - Auto wrap mode
+                    if (final_byte == 'h') then
+                        parser%auto_wrap_mode = .true.
+                        print '(A)', "DECAWM: Auto wrap ENABLED"
+                    else if (final_byte == 'l') then
+                        parser%auto_wrap_mode = .false.
+                        print '(A)', "DECAWM: Auto wrap DISABLED"
+                    end if
                 case (25)  ! DECTCEM - Text cursor enable/disable
                     if (final_byte == 'h') then
                         grid%cursor_visible = .true.
@@ -681,19 +694,31 @@ contains
 
         case ('C')  ! CUF - Cursor Forward (relative - preserve pending_wrap)
             n = max(1, parser%params(1))
+            col = grid%cursor_col
             grid%cursor_col = min(grid%cols, grid%cursor_col + n)
+            print '(A,I0,A,I0,A,I0,A,I0)', "CUF: Forward ", n, " from col=", col, &
+                " to col=", grid%cursor_col, " (grid_cols=", grid%cols, ")"
 
-        case ('D')  ! CUB - Cursor Back (relative - preserve pending_wrap)
+        case ('D')  ! CUB - Cursor Back
             n = max(1, parser%params(1))
+            col = grid%cursor_col
             grid%cursor_col = max(1, grid%cursor_col - n)
-            if (DEBUG_SEQUENCES .and. grid%pending_wrap) then
-                print '(A,I0,A)', "CSI ", n, " D: Preserving pending_wrap (relative movement)"
+            print '(A,I0,A,I0,A,I0,A,I0)', "CUB: Back ", n, " from col=", col, &
+                " to col=", grid%cursor_col, " (grid_cols=", grid%cols, ")"
+            ! CUB clears pending wrap since we're moving away from the edge
+            if (grid%pending_wrap) then
+                if (DEBUG_SEQUENCES) then
+                    print '(A)', "CUB: Clearing pending_wrap"
+                end if
+                grid%pending_wrap = .false.
             end if
 
         case ('H', 'f')  ! CUP - Cursor Position (absolute - clear pending_wrap)
             row = max(1, parser%params(1))
             col = 1
             if (parser%num_params >= 2) col = max(1, parser%params(2))
+            print '(A,I0,A,I0,A,I0,A,I0)', "CUP: Move to row=", row, " col=", col, &
+                " (grid: ", grid%rows, "x", grid%cols, ")"
             call grid%move_cursor(row, col)
             if (DEBUG_SEQUENCES .and. grid%pending_wrap) then
                 print '(A,I0,A,I0,A)', "CUP: Clearing pending_wrap (absolute positioning to ", row, ",", col, ")"
@@ -741,7 +766,10 @@ contains
         case ('G')  ! CHA - Cursor Horizontal Absolute
             col = 1
             if (parser%num_params >= 1) col = max(1, parser%params(1))
+            print '(A,I0,A,I0,A,I0)', "CHA: Move to col ", col, " (grid cols=", grid%cols, &
+                ", requested=", parser%params(1), ")"
             call grid%move_cursor(grid%cursor_row, col)
+            grid%pending_wrap = .false.  ! Clear pending wrap on absolute positioning
 
         case ('d')  ! VPA - Line Position Absolute
             row = 1
@@ -1079,23 +1107,31 @@ contains
         integer :: prev_col
         type(cell_t) :: cell
 
-        ! DEBUG: Log characters near edge with grid dimensions
-        if (grid%cursor_col >= grid%cols - 5) then
-            if (codepoint >= 32 .and. codepoint <= 126) then
-                print '(A,A,A,I0,A,I0,A,I0)', "NEAR_EDGE: '", char(codepoint), &
-                      "' row=", grid%cursor_row, " col=", grid%cursor_col, " grid_cols=", grid%cols
-            end if
-        end if
+        ! DEBUG disabled - verbose character logging
+        ! if (grid%cursor_col >= grid%cols - 5) then
+        !     if (codepoint >= 32 .and. codepoint <= 126) then
+        !         print '(A,A,A,I0,A,I0,A,I0)', "NEAR_EDGE: '", char(codepoint), &
+        !               "' row=", grid%cursor_row, " col=", grid%cursor_col, " grid_cols=", grid%cols
+        !     end if
+        ! end if
 
         ! VT100 pending wrap: if we're in pending wrap state AND still at last column, wrap now
+        ! Only if auto-wrap mode is enabled
         ! If cursor was moved away from edge, clear pending_wrap without wrapping
         if (grid%pending_wrap) then
             if (grid%cursor_col == grid%cols) then
-                ! Still at edge - perform the wrap
-                if (DEBUG_SEQUENCES) then
-                    print '(A,I0,A)', "PENDING_WRAP: Wrapping before writing char ", codepoint, " ('"//char(codepoint)//"')"
+                if (parser%auto_wrap_mode) then
+                    ! Still at edge and autowrap enabled - perform the wrap
+                    if (DEBUG_SEQUENCES) then
+                        print '(A,I0,A)', "PENDING_WRAP: Wrapping before writing char ", codepoint, " ('"//char(codepoint)//"')"
+                    end if
+                    call handle_newline(grid)
+                else
+                    ! Autowrap disabled - just overwrite the last character
+                    if (DEBUG_SEQUENCES) then
+                        print '(A)', "PENDING_WRAP: Auto-wrap disabled, will overwrite last char"
+                    end if
                 end if
-                call handle_newline(grid)
             else
                 ! Cursor moved away from edge - just clear the flag
                 if (DEBUG_SEQUENCES) then
@@ -1103,6 +1139,16 @@ contains
                 end if
             end if
             grid%pending_wrap = .false.
+        end if
+
+        ! If cursor is past the edge, write at last column
+        ! This shouldn't happen normally, but handle it gracefully
+        if (grid%cursor_col > grid%cols) then
+            if (DEBUG_SEQUENCES) then
+                print '(A,I0,A,I0,A)', "PAST_EDGE: cursor past edge (col=", grid%cursor_col, &
+                    " > ", grid%cols, "), clamping to last column"
+            end if
+            grid%cursor_col = grid%cols
         end if
 
         ! Get the display width of this character
@@ -1125,6 +1171,12 @@ contains
         end if
 
         ! Write character at cursor position
+        ! Debug: show ALL character writes to see RPROMPT positioning
+        if (codepoint >= 32 .and. codepoint <= 126) then
+            print '(A,A,A,I0,A,I0,A,I0,A)', "WRITE_CHAR: '", char(codepoint), "' at row=", &
+                grid%cursor_row, " col=", grid%cursor_col, "/", grid%cols, &
+                " pending_wrap=", merge("T", "F", grid%pending_wrap)
+        end if
         call grid%set_cell(grid%cursor_row, grid%cursor_col, codepoint, &
                           parser%current_fg, parser%current_bg, parser%current_attrs, &
                           parser%current_hyperlink_id)
@@ -1140,36 +1192,50 @@ contains
         end if
 
         ! Advance cursor by character width (1 or 2 columns)
+        ! BUT: don't advance if we're at the last column - just stay there
+        ! This allows RPROMPT to work by overwriting at the last column
         prev_col = grid%cursor_col
-        grid%cursor_col = grid%cursor_col + char_width
+        if (grid%cursor_col < grid%cols) then
+            ! Not at edge yet - advance normally
+            grid%cursor_col = grid%cursor_col + char_width
+        else
+            ! Already at last column - don't advance (overwrite mode)
+            if (DEBUG_SEQUENCES) then
+                print '(A)', "AT_EDGE: Not advancing cursor (already at last column)"
+            end if
+        end if
 
         if (DEBUG_SEQUENCES .and. char_width > 1) then
             print '(A,I0)', "DEBUG: cursor_col after: ", grid%cursor_col
         end if
 
-        ! VT100 pending wrap: if cursor is exactly at cols+1, set pending_wrap
-        ! The wrap happens when the NEXT character is written (see top of this subroutine)
+        ! Handle cursor going past edge
         if (grid%cursor_col == grid%cols + 1) then
-            if (DEBUG_SEQUENCES) then
-                print '(A,I0,A,I0,A,I0)', "EDGE: cursor reached cols+1 (", grid%cursor_col, &
-                    "), clamping to ", grid%cols, ", char=", codepoint
-            end if
+            ! Cursor went one past edge - clamp back
             grid%cursor_col = grid%cols
-            grid%pending_wrap = .true.
+            ! Note: we don't set pending_wrap for modern terminal behavior
         else if (grid%cursor_col > grid%cols + 1) then
-            ! For double-width chars that go past cols+1, wrap immediately
-            if (DEBUG_SEQUENCES) then
-                print '(A,I0,A,I0,A,I0)', "EDGE: cursor past cols+1 (", grid%cursor_col, &
-                    " > ", grid%cols + 1, "), wrapping immediately, char=", codepoint
+            ! For double-width chars that go past cols+1, wrap immediately (if autowrap enabled)
+            if (parser%auto_wrap_mode) then
+                if (DEBUG_SEQUENCES) then
+                    print '(A,I0,A,I0,A,I0)', "EDGE: cursor past cols+1 (", grid%cursor_col, &
+                        " > ", grid%cols + 1, "), wrapping immediately, char=", codepoint
+                end if
+                call handle_newline(grid)
+            else
+                ! Clamp to cols+1 if autowrap disabled
+                grid%cursor_col = grid%cols + 1
+                if (DEBUG_SEQUENCES) then
+                    print '(A)', "EDGE: double-width char past edge, autowrap disabled - clamping to cols+1"
+                end if
             end if
-            call handle_newline(grid)
         end if
     end subroutine write_char
 
     ! Handle newline
     subroutine handle_newline(grid)
         type(grid_t), intent(inout) :: grid
-        logical, parameter :: DEBUG_NEWLINES = .true.
+        logical, parameter :: DEBUG_NEWLINES = .false.
 
         if (DEBUG_NEWLINES) then
             print '(A,I0,A,I0)', "NEWLINE: row ", grid%cursor_row, " -> ", grid%cursor_row + 1

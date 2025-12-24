@@ -261,21 +261,11 @@ contains
         this%scroll_offset = 0
     end subroutine grid_scroll_up
 
-    ! Resize grid (creates new buffer, copies old content)
+    ! Resize grid (clears screen for shell to redraw after SIGWINCH)
     subroutine grid_resize(this, new_rows, new_cols)
         class(grid_t), intent(inout) :: this
         integer, intent(in) :: new_rows, new_cols
-        type(cell_t), allocatable :: old_cells(:,:)
-        integer :: copy_rows, copy_cols, i, j
-        integer :: old_rows, old_cols
-
-        ! Save old dimensions
-        old_rows = this%rows
-        old_cols = this%cols
-
-        ! Save old cells
-        allocate(old_cells(this%cols, this%rows))
-        old_cells = this%cells
+        integer :: i, j
 
         ! Deallocate and reallocate with new size
         deallocate(this%cells)
@@ -296,32 +286,32 @@ contains
             this%scroll_offset = 0
         end if
 
-        ! Update dimensions BEFORE clearing (grid_clear uses this%rows/cols!)
+        ! Update dimensions
         this%rows = new_rows
         this%cols = new_cols
 
-        ! Clear new grid first
-        call this%clear()
-
-        ! Determine how much to copy (using saved old dimensions)
-        copy_rows = min(old_rows, new_rows)
-        copy_cols = min(old_cols, new_cols)
-
-        ! Copy old content
-        do j = 1, copy_rows
-            do i = 1, copy_cols
-                this%cells(i, j) = old_cells(i, j)
+        ! Initialize new grid to empty - shell will redraw after SIGWINCH
+        do j = 1, new_rows
+            do i = 1, new_cols
+                this%cells(i, j)%codepoint = 32  ! space
+                this%cells(i, j)%fg_color = int(z'FFFFFF', 4)
+                this%cells(i, j)%bg_color = 0
+                this%cells(i, j)%attributes = 0
+                this%cells(i, j)%hyperlink_id = 0
             end do
         end do
 
-        ! Clamp cursor to new bounds
-        if (this%cursor_row > new_rows) this%cursor_row = new_rows
-        if (this%cursor_col > new_cols) this%cursor_col = new_cols
+        ! Keep cursor at current position (clamped to new bounds)
+        ! Shell will reposition cursor as needed during redraw
+        this%cursor_row = min(max(1, this%cursor_row), new_rows)
+        this%cursor_col = min(max(1, this%cursor_col), new_cols)
 
-        ! Update scroll region to match new size
+        ! Clear pending wrap on resize
+        this%pending_wrap = .false.
+
+        ! Reset scroll region to full screen on resize
+        this%scroll_top = 1
         this%scroll_bottom = new_rows
-
-        deallocate(old_cells)
     end subroutine grid_resize
 
     ! Move cursor to position (clamps to grid bounds)
